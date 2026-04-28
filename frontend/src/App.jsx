@@ -24,7 +24,7 @@ import SettingsPage from './pages/SettingsPage'
 import SignupPage from './pages/SignupPage'
 import TestPanel from './pages/TestPanel'
 
-const API = '';
+const API = '/api';
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);

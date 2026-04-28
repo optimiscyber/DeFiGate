@@ -10,7 +10,7 @@ export const useUserRefresh = () => {
       const token = localStorage.getItem('authToken');
       if (!token) return null;
 
-      const res = await fetch('/user/me', {
+      const res = await fetch('/api/user/me', {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

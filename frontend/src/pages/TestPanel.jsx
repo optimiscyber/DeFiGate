@@ -19,7 +19,7 @@ const TestPanel = ({ currentUser }) => {
   const loadHistory = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/user/transactions', {
+      const response = await fetch('/api/user/transactions', {
         headers: authHeaders,
       });
       const data = await response.json();
@@ -51,7 +51,7 @@ const TestPanel = ({ currentUser }) => {
 
     setLoading(true);
     try {
-      const response = await fetch('/test/deposit', {
+      const response = await fetch('/api/test/deposit', {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ amount, reference: depositReference || `test-deposit-${Date.now()}` }),
@@ -86,7 +86,7 @@ const TestPanel = ({ currentUser }) => {
 
     setLoading(true);
     try {
-      const response = await fetch('/transfer', {
+      const response = await fetch('/api/transfer', {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
@@ -126,7 +126,7 @@ const TestPanel = ({ currentUser }) => {
 
     setLoading(true);
     try {
-      const response = await fetch('/transfer/withdraw', {
+      const response = await fetch('/api/transfer/withdraw', {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ amount, toAddress: withdrawAddress, chain: 'solana' }),

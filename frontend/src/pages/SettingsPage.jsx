@@ -20,7 +20,7 @@ const SettingsPage = ({ currentUser, navigateTo, toggleAuth }) => {
     const newEmail = prompt('Enter new email address:');
     if (!newEmail) return;
     try {
-      const response = await fetch('/user/profile', {
+      const response = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -46,7 +46,7 @@ const SettingsPage = ({ currentUser, navigateTo, toggleAuth }) => {
     const newPassword = prompt('Enter new password:');
     if (!newPassword) return;
     try {
-      const response = await fetch('/user/change-password', {
+      const response = await fetch('/api/user/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -67,7 +67,7 @@ const SettingsPage = ({ currentUser, navigateTo, toggleAuth }) => {
 
   const handleEnable2FA = async () => {
     try {
-      const response = await fetch('/user/enable-2fa', {
+      const response = await fetch('/api/user/enable-2fa', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
@@ -90,7 +90,7 @@ const SettingsPage = ({ currentUser, navigateTo, toggleAuth }) => {
     const body = {};
     body[field] = value;
     try {
-      const response = await fetch('/user/profile', {
+      const response = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

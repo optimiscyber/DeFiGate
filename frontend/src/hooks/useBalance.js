@@ -13,7 +13,7 @@ export function useBalance(userId) {
 
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch('/user/profile', {
+      const response = await fetch('/api/user/profile', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
