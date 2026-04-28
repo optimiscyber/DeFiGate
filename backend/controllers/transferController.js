@@ -4,7 +4,9 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import sequelize from "../config/database.js";
 import Balance from "../models/Balance.js";
+import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
+import User from "../models/User.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import { transferFunds } from "../services/transferService.js";
 dotenv.config();
@@ -17,43 +19,50 @@ function generatePIN() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Lookup user by email or UID (email in this case since we use emails as identifiers)
+// Resolve recipient by email or phone number
 export const lookupRecipient = async (req, res) => {
-  const { identifier } = req.body;
+  const { recipient } = req.body;
 
-  if (!identifier) {
-    return res.status(400).json({ ok: false, error: "Identifier (email or UID) required" });
+  if (!recipient || typeof recipient !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Recipient is required' });
+  }
+
+  const normalizedRecipient = recipient.trim();
+  if (!normalizedRecipient) {
+    return res.status(400).json({ ok: false, error: 'Recipient cannot be empty' });
   }
 
   try {
-    let query;
-    let params;
-
-    if (identifier.includes("@")) {
-      query = `SELECT id, email FROM users WHERE email = $1 LIMIT 1`;
-      params = [identifier.toLowerCase()];
-    } else {
-      query = `SELECT id, email FROM users WHERE id = $1 LIMIT 1`;
-      params = [identifier];
-    }
+    const isEmail = normalizedRecipient.includes('@');
+    const query = `SELECT id, first_name, last_name, email, phone FROM users WHERE ${isEmail ? 'LOWER(email) = $1' : 'phone = $1'}`;
+    const params = [isEmail ? normalizedRecipient.toLowerCase() : normalizedRecipient];
 
     const result = await pool.query(query, params);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ ok: false, error: "Recipient not found" });
+      return res.status(404).json({ ok: false, error: 'Recipient not found' });
     }
 
-    const recipient = result.rows[0];
-    res.json({
+    if (result.rows.length > 1) {
+      console.error('lookupRecipient ambiguity', normalizedRecipient, result.rows);
+      return res.status(500).json({ ok: false, error: 'Multiple recipients found' });
+    }
+
+    const recipientUser = result.rows[0];
+    const fullName = [recipientUser.first_name, recipientUser.last_name].filter(Boolean).join(' ').trim();
+
+    return res.json({
       ok: true,
       data: {
-        id: recipient.id,
-        email: recipient.email,
+        userId: recipientUser.id,
+        name: fullName || recipientUser.email || recipientUser.phone || 'Unknown User',
+        email: recipientUser.email,
+        phone: recipientUser.phone,
       },
     });
   } catch (err) {
-    console.error("lookupRecipient error", err);
-    res.status(500).json({ ok: false, error: "Lookup failed" });
+    console.error('lookupRecipient error', err);
+    res.status(500).json({ ok: false, error: 'Lookup failed' });
   }
 };
 
@@ -257,50 +266,91 @@ export const confirmTransfer = async (req, res) => {
 
 export const transfer = async (req, res) => {
   const senderId = req.user?.id;
-  const { toUserId, recipientId, recipient, recipientEmail, recipientPhone, amount, asset } = req.body;
-  const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"] || req.headers["idempotency_key"];
+  const { recipient, amount, asset } = req.body;
+  const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"] || req.headers["idempotency_key"] || null;
 
   if (!senderId) {
     return respondError(res, 401, "Not authenticated", false);
   }
 
-  if (!amount || (!toUserId && !recipientId && !recipient && !recipientEmail && !recipientPhone)) {
-    return respondError(res, 400, "Recipient and amount are required", false);
+  if (req.body.toUserId || req.body.recipientId || req.body.recipientEmail || req.body.recipientPhone) {
+    return respondError(res, 400, "Only recipient, amount, and asset are allowed", false);
   }
 
-  let resolvedReceiverId = toUserId || recipientId;
+  if (!recipient || typeof recipient !== 'string' || !recipient.trim()) {
+    return respondError(res, 400, "Recipient is required", false);
+  }
+
+  const recipientInput = recipient.trim();
+  if (!amount) {
+    return respondError(res, 400, "Amount is required", false);
+  }
+
+  const amountString = String(amount).trim();
+  const amountRegex = /^\d+(?:\.\d{1,6})?$/;
+  if (!amountRegex.test(amountString) || amountString === '0' || /^0+(?:\.0+)?$/.test(amountString)) {
+    return respondError(res, 400, "Amount must be a positive decimal with up to 6 decimals", false);
+  }
+
+  if (!asset || typeof asset !== 'string') {
+    return respondError(res, 400, "Asset is required", false);
+  }
+
   try {
-    if (!resolvedReceiverId) {
-      const identifier = String(recipient || recipientEmail || recipientPhone || "").trim();
-      if (!identifier) {
-        return respondError(res, 400, "Recipient identifier is required", false);
-      }
+    const isEmail = recipientInput.includes('@');
+    const whereClause = isEmail
+      ? { email: recipientInput }
+      : { phone: recipientInput };
 
-      const normalizedEmail = identifier.toLowerCase();
-      const normalizedPhone = identifier.replace(/[^0-9]/g, "");
-      const lookupResult = await pool.query(
-        `SELECT id FROM users
-         WHERE id = $1
-           OR LOWER(email) = $2
-           OR phone = $3
-           OR regexp_replace(phone, '[^0-9]', '', 'g') = $4
-         LIMIT 1`,
-        [identifier, normalizedEmail, identifier, normalizedPhone]
-      );
-
-      if (lookupResult.rows.length === 0) {
-        return respondError(res, 404, "Recipient not found", false);
-      }
-
-      resolvedReceiverId = lookupResult.rows[0].id;
-    }
-
-    const transfer = await transferFunds(senderId, resolvedReceiverId, amount, {
-      asset,
-      idempotencyKey,
+    const receiverUsers = await User.findAll({
+      where: whereClause,
+      limit: 2,
     });
 
-    return respondSuccess(res, { transfer }, "Transfer completed successfully");
+    if (receiverUsers.length === 0) {
+      return respondError(res, 404, "Recipient not found", false);
+    }
+
+    if (receiverUsers.length > 1) {
+      console.error("transfer recipient ambiguity", recipientInput, receiverUsers.map((u) => u.id));
+      return respondError(res, 500, "Multiple recipients found", false);
+    }
+
+    const receiverUser = receiverUsers[0];
+    const receiverId = receiverUser.id;
+
+    if (senderId === receiverId) {
+      return respondError(res, 400, "Cannot transfer to yourself", false);
+    }
+
+    const senderAccount = await Account.findOne({
+      where: {
+        user_id: senderId,
+        asset: asset.trim(),
+      },
+    });
+
+    if (!senderAccount) {
+      return respondError(res, 404, "Sender account not found for asset", false);
+    }
+
+    console.log("TRANSFER RESOLVED:", {
+      senderId,
+      receiverId,
+      recipientInput,
+    });
+
+    const transferRecord = await transferFunds(senderId, receiverId, amountString, {
+      asset: asset.trim(),
+      reference: idempotencyKey,
+    });
+
+    return res.json({
+      success: true,
+      transactionId: transferRecord.id,
+      amount: amountString,
+      toUserId: receiverId,
+    });
   } catch (err) {
     console.error("transfer error", err);
     if (err.message === "INSUFFICIENT_FUNDS") {

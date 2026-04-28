@@ -34,16 +34,17 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
 
   const asset = options.asset || DEFAULT_ASSET;
   const idempotencyKey = options.idempotencyKey?.trim() || null;
+  const reference = options.reference?.trim() || idempotencyKey || null;
   const amountString = normalizeAmount(amount);
 
   let transactionRecord = null;
 
-  if (idempotencyKey) {
+  if (reference) {
     transactionRecord = await Transaction.findOne({
       where: {
         user_id: senderId,
         type: "transfer",
-        reference: idempotencyKey,
+        reference,
         asset,
       },
     });
@@ -59,7 +60,7 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
     status: "pending",
     amount: amountString,
     asset,
-    reference: idempotencyKey,
+    reference,
   });
 
   try {
