@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import TransferModal from './TransferModal';
 import { useBalance } from '../hooks/useBalance';
-import { apiUrl } from '../api';
+import { apiUrl, buildInternalTransferPayload } from '../api';
 
 function DashboardRefactored({ currentUser, navigateTo }) {
   const [copied, setCopied] = useState(false);
@@ -28,14 +28,13 @@ function DashboardRefactored({ currentUser, navigateTo }) {
       let endpoint, payload;
 
       if (transferData.type === 'user') {
-        // Internal user transfer: include both generic and email identifiers for compatibility
+        // Internal user transfer: include compatibility fields for older backend contracts
         endpoint = apiUrl('/transfer');
-        payload = {
-          recipient: transferData.recipient,
-          recipientEmail: transferData.recipient,
-          amount: transferData.amount,
-          asset: transferData.token || 'USDC',
-        };
+        payload = buildInternalTransferPayload(
+          transferData.recipient,
+          transferData.amount,
+          transferData.token || 'USDC'
+        );
       } else {
         // External wallet transfer
         endpoint = apiUrl('/wallet/send');

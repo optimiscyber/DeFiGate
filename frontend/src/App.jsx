@@ -23,7 +23,7 @@ import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import SignupPage from './pages/SignupPage'
 import TestPanel from './pages/TestPanel'
-import { apiUrl } from './api'
+import { apiUrl, buildInternalTransferPayload } from './api'
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -299,17 +299,7 @@ function App() {
 
     try {
       const token = localStorage.getItem('authToken');
-      const body = {
-        amount: parseFloat(amount),
-        asset,
-      };
-      if (recipientIdentifier) {
-        body.recipient = recipientIdentifier;
-        body.recipientEmail = recipientIdentifier;
-      }
-      if (recipientId) {
-        body.recipientId = recipientId;
-      }
+      const body = buildInternalTransferPayload(recipientIdentifier, amount, asset, recipientId);
 
       const res = await fetch(apiUrl('/transfer'), {
         method: 'POST',
