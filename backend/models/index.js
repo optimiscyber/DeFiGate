@@ -1,9 +1,10 @@
 import sequelize from "../config/database.js";
 import User from "./User.js";
-import Balance from "./Balance.js";
+import Account from "./Account.js";
 import Transaction from "./Transaction.js";
 import Transfer from "./Transfer.js";
 import Wallet from "./Wallet.js";
+import LedgerEntry from "./LedgerEntry.js";
 
 // ========== ASSOCIATIONS ==========
 
@@ -11,13 +12,23 @@ import Wallet from "./Wallet.js";
 User.hasMany(Wallet, { foreignKey: "user_id", onDelete: "CASCADE" });
 Wallet.belongsTo(User, { foreignKey: "user_id" });
 
-// User -> Balance (One-to-One)
-User.hasOne(Balance, { foreignKey: "user_id", onDelete: "CASCADE" });
-Balance.belongsTo(User, { foreignKey: "user_id" });
+// User -> Account (One-to-Many)
+User.hasMany(Account, { foreignKey: "user_id", onDelete: "CASCADE" });
+Account.belongsTo(User, { foreignKey: "user_id" });
 
 // User -> Transaction (One-to-Many)
 User.hasMany(Transaction, { foreignKey: "user_id", onDelete: "CASCADE" });
 Transaction.belongsTo(User, { foreignKey: "user_id" });
+
+// Transaction -> LedgerEntry (One-to-Many)
+Transaction.hasMany(LedgerEntry, { foreignKey: "transaction_id", onDelete: "CASCADE" });
+LedgerEntry.belongsTo(Transaction, { foreignKey: "transaction_id" });
+
+// Account -> LedgerEntry (Two roles)
+Account.hasMany(LedgerEntry, { foreignKey: "debit_account_id", as: "debits", onDelete: "CASCADE" });
+Account.hasMany(LedgerEntry, { foreignKey: "credit_account_id", as: "credits", onDelete: "CASCADE" });
+LedgerEntry.belongsTo(Account, { foreignKey: "debit_account_id", as: "debitAccount" });
+LedgerEntry.belongsTo(Account, { foreignKey: "credit_account_id", as: "creditAccount" });
 
 // User -> Transfer (One-to-Many) - Sender
 User.hasMany(Transfer, { 
@@ -41,4 +52,4 @@ Transfer.belongsTo(User, {
   as: "receiver" 
 });
 
-export { sequelize, User, Balance, Transaction, Transfer, Wallet };
+export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry };

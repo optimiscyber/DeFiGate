@@ -21,6 +21,11 @@ const Transaction = sequelize.define(
       type: DataTypes.DECIMAL(20, 6),
       allowNull: false,
     },
+    asset: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: "USDC",
+    },
     status: {
       type: DataTypes.ENUM("pending", "completed", "failed"),
       defaultValue: "pending",

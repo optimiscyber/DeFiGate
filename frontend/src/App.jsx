@@ -280,6 +280,51 @@ function App() {
     }
   };
 
+  const sendInternalTransfer = async (recipientId, amount, asset = 'USDC') => {
+    if (!currentUser) {
+      toast("Please sign in first", "error");
+      setAuthModalOpen(true);
+      return;
+    }
+
+    if (!recipientId) {
+      toast("Please select a recipient", "error");
+      return;
+    }
+
+    if (!amount || parseFloat(amount) <= 0) {
+      toast("Enter a valid amount", "error");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('authToken');
+      const res = await fetch(apiUrl('/transfer'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          toUserId: recipientId,
+          amount: parseFloat(amount),
+          asset,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.ok) {
+        toast(data.error || 'Transfer failed', 'error');
+        return;
+      }
+
+      toast('Transfer completed successfully', 'success');
+      return data.data.transfer;
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
   return (
     <div className="app">
       {/* Top Navigation */}
@@ -336,7 +381,7 @@ function App() {
             {currentView === 'deposit-exchange' && <DepositExchangePage currentUser={currentUser} navigateTo={navigateTo} />}
             {currentView === 'withdraw-bank' && <WithdrawBankPage currentUser={currentUser} createOfframp={createOfframp} navigateTo={navigateTo} />}
             {currentView === 'withdraw-exchange' && <WithdrawExchangePage currentUser={currentUser} sendTokens={sendTokens} navigateTo={navigateTo} />}
-            {currentView === 'transfer-internal' && <TransferInternalPage currentUser={currentUser} sendTokens={sendTokens} navigateTo={navigateTo} />}
+            {currentView === 'transfer-internal' && <TransferInternalPage currentUser={currentUser} internalTransfer={sendInternalTransfer} onShowToast={toast} navigateTo={navigateTo} />}
             {currentView === 'finances' && <FinancesPage currentUser={currentUser} navigateTo={navigateTo} />}
             {currentView === 'history' && <HistoryPage currentUser={currentUser} navigateTo={navigateTo} />}
             {currentView === 'settings' && <SettingsPage currentUser={currentUser} navigateTo={navigateTo} toggleAuth={toggleAuth} />}

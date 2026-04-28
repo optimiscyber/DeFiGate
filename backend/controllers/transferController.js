@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 import sequelize from "../config/database.js";
 import Balance from "../models/Balance.js";
 import Transaction from "../models/Transaction.js";
+import { respondError, respondSuccess } from "../utils/response.js";
+import { transferFunds } from "../services/transferService.js";
 dotenv.config();
 
 const inMemoryTransfers = new Map();
@@ -253,6 +255,45 @@ export const confirmTransfer = async (req, res) => {
   }
 };
 
+export const transfer = async (req, res) => {
+  const senderId = req.user?.id;
+  const { toUserId, amount, asset } = req.body;
+  const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"] || req.headers["idempotency_key"];
+
+  if (!senderId) {
+    return respondError(res, 401, "Not authenticated", false);
+  }
+
+  if (!toUserId || !amount) {
+    return respondError(res, 400, "toUserId and amount are required", false);
+  }
+
+  try {
+    const transfer = await transferFunds(senderId, toUserId, amount, {
+      asset,
+      idempotencyKey,
+    });
+
+    return respondSuccess(res, { transfer }, "Transfer completed successfully");
+  } catch (err) {
+    console.error("transfer error", err);
+    if (err.message === "INSUFFICIENT_FUNDS") {
+      return respondError(res, 400, "Insufficient available balance", false);
+    }
+    if (err.message === "RECEIVER_ACCOUNT_NOT_FOUND" || err.message === "SENDER_ACCOUNT_NOT_FOUND") {
+      return respondError(res, 404, "Account not found", false);
+    }
+    if (err.message === "SELF_TRANSFER_NOT_ALLOWED") {
+      return respondError(res, 400, "Cannot transfer to yourself", false);
+    }
+    if (err.message === "INVALID_AMOUNT") {
+      return respondError(res, 400, "Amount must be a positive decimal with up to 6 decimals", false);
+    }
+
+    return respondError(res, 500, "Transfer failed", true, err.message);
+  }
+};
+
 // Get transfer history for a user
 export const getTransferHistory = async (req, res) => {
   const userId = req.user?.id;
@@ -298,107 +339,6 @@ export const getTransferHistory = async (req, res) => {
   } catch (err) {
     console.error("getTransferHistory error", err);
     res.status(500).json({ ok: false, error: "Failed to retrieve history" });
-  }
-};
-
-export const transfer = async (req, res) => {
-  const senderId = req.user?.id;
-  const { recipientEmail, amount, requestReference, chain = "solana" } = req.body;
-
-  if (!senderId) {
-    return res.status(401).json({ ok: false, error: "Not authenticated" });
-  }
-
-  if (chain !== "solana") {
-    return res.status(400).json({ ok: false, error: "Only Solana transfers are supported" });
-  }
-
-  const transferAmount = parseFloat(amount);
-  if (!recipientEmail || Number.isNaN(transferAmount) || transferAmount <= 0) {
-    return res.status(400).json({ ok: false, error: "Recipient email and positive amount are required" });
-  }
-
-  const normalizedRecipientEmail = recipientEmail.toLowerCase();
-
-  try {
-    const recipientResult = await pool.query(`SELECT id, email FROM users WHERE email = $1`, [normalizedRecipientEmail]);
-    if (recipientResult.rows.length === 0) {
-      return res.status(404).json({ ok: false, error: "Recipient not found" });
-    }
-
-    const recipientId = recipientResult.rows[0].id;
-    if (recipientId === senderId) {
-      return res.status(400).json({ ok: false, error: "Cannot transfer to yourself" });
-    }
-
-    if (requestReference) {
-      const existingTransaction = await pool.query(
-        `SELECT id, status FROM transactions WHERE user_id = $1 AND type = $2 AND reference = $3`,
-        [senderId, 'transfer', requestReference]
-      );
-
-      if (existingTransaction.rows.length > 0) {
-        return res.json({
-          ok: true,
-          data: {
-            transactionId: existingTransaction.rows[0].id,
-            status: existingTransaction.rows[0].status,
-            message: "Duplicate request ignored. Existing transfer returned.",
-          },
-        });
-      }
-    }
-
-    await pool.query('BEGIN');
-
-    const senderBalanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [senderId]
-    );
-    if (senderBalanceResult.rows.length === 0 || Number(senderBalanceResult.rows[0].balance) < transferAmount) {
-      await pool.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: "Insufficient balance" });
-    }
-
-    await pool.query(
-      `UPDATE balances SET balance = balance - $1 WHERE user_id = $2`,
-      [transferAmount, senderId]
-    );
-    await pool.query(
-      `UPDATE balances SET balance = balance + $1 WHERE user_id = $2`,
-      [transferAmount, recipientId]
-    );
-
-    const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, description, reference, tx_hash, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, status`,
-      [
-        senderId,
-        'transfer',
-        transferAmount,
-        Number(senderBalanceResult.rows[0].balance) - transferAmount,
-        `Transfer to ${normalizedRecipientEmail}`,
-        requestReference || `transfer:${Date.now()}->${normalizedRecipientEmail}`,
-        `solana-transfer-${Date.now()}`,
-        'completed'
-      ]
-    );
-
-    await pool.query('COMMIT');
-
-    res.json({
-      ok: true,
-      data: {
-        transactionId: transactionResult.rows[0].id,
-        status: transactionResult.rows[0].status,
-        message: "Transfer completed successfully",
-      },
-    });
-  } catch (err) {
-    await pool.query('ROLLBACK');
-    console.error("transfer error", err);
-    res.status(500).json({ ok: false, error: "Transfer failed" });
   }
 };
 

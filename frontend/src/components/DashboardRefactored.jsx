@@ -28,13 +28,26 @@ function DashboardRefactored({ currentUser, navigateTo }) {
       let endpoint, payload;
 
       if (transferData.type === 'user') {
-        // Internal user transfer
-        endpoint = apiUrl('/transfer/initiate');
+        // Internal user transfer: resolve recipient identifier then post to new transfer endpoint
+        const lookupRes = await fetch(apiUrl('/transfer/lookup'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ identifier: transferData.recipient }),
+        });
+
+        const lookupData = await lookupRes.json();
+        if (!lookupRes.ok) {
+          throw new Error(lookupData.error || 'Recipient lookup failed');
+        }
+
+        endpoint = apiUrl('/transfer');
         payload = {
-          recipientId: transferData.recipient, // This should be user ID
+          toUserId: lookupData.data.id,
           amount: transferData.amount,
-          tokenSymbol: transferData.token,
-          chain: 'sepolia' // Default for internal transfers
+          asset: transferData.token || 'USDC',
         };
       } else {
         // External wallet transfer
@@ -43,7 +56,7 @@ function DashboardRefactored({ currentUser, navigateTo }) {
           toAddress: transferData.recipient,
           amount: transferData.amount,
           tokenAddress: '', // Empty for native token
-          chain: transferData.network
+          chain: transferData.network,
         };
       }
 

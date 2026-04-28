@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FormStep, ConfirmationModal, ProcessingScreen, SuccessScreen } from '../components';
+import { apiUrl } from '../api';
 
-const TransferInternalPage = ({ currentUser, sendTokens, navigateTo }) => {
+const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navigateTo }) => {
   const [currentStep, setCurrentStep] = useState('form');
   const wallet = currentUser?.wallet;
   const [searchQuery, setSearchQuery] = useState('');
@@ -23,17 +24,26 @@ const TransferInternalPage = ({ currentUser, sendTokens, navigateTo }) => {
 
     setSearching(true);
     try {
-      // Mock search - in real app, this would call an API
-      const mockResults = [
-        { id: 1, email: 'user1@example.com', username: 'user1' },
-        { id: 2, email: 'user2@example.com', username: 'user2' },
-      ].filter(user =>
-        user.email.toLowerCase().includes(query.toLowerCase()) ||
-        user.username.toLowerCase().includes(query.toLowerCase())
-      );
-      setSearchResults(mockResults);
+      const token = localStorage.getItem('authToken');
+      const res = await fetch(apiUrl('/transfer/lookup'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ identifier: query }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        onShowToast?.(data.error || 'User lookup failed', 'error');
+        setSearchResults([]);
+      } else {
+        setSearchResults(data.data ? [data.data] : []);
+      }
     } catch (error) {
       console.error('Search failed:', error);
+      onShowToast?.('User lookup failed', 'error');
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }
@@ -76,21 +86,22 @@ const TransferInternalPage = ({ currentUser, sendTokens, navigateTo }) => {
     setCurrentStep('processing');
 
     try {
-      // Mock internal transfer - in real app, this would call a different API
-      const mockTransaction = {
-        id: 'tx_' + Date.now(),
-        amount: formData.amount,
+      const transfer = await internalTransfer(selectedUser.id, formData.amount, 'USDC');
+      if (!transfer) {
+        setCurrentStep('form');
+        return;
+      }
+
+      setTransactionData({
+        id: transfer.id,
+        amount: transfer.amount,
         recipient: selectedUser.email,
-        timestamp: new Date().toISOString(),
-        status: 'completed'
-      };
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      setTransactionData(mockTransaction);
+        timestamp: transfer.created_at || new Date().toISOString(),
+        status: transfer.status || 'completed'
+      });
       setCurrentStep('success');
     } catch (error) {
+      onShowToast?.('Transfer failed', 'error');
       setCurrentStep('form');
     } finally {
       setLoading(false);
@@ -185,14 +196,14 @@ const TransferInternalPage = ({ currentUser, sendTokens, navigateTo }) => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="amount">Amount (ETH)</label>
+            <label htmlFor="amount">Amount (USDC)</label>
             <input
               type="number"
               id="amount"
               name="amount"
               value={formData.amount}
               onChange={handleInputChange}
-              placeholder="0.01"
+              placeholder="1.00"
               min="0.000001"
               step="0.000001"
               autoComplete="off"

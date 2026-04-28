@@ -24,9 +24,20 @@ CREATE TABLE IF NOT EXISTS transactions (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     type TEXT CHECK (type IN ('deposit', 'transfer', 'withdrawal')) NOT NULL,
     amount NUMERIC(20,6) NOT NULL,
+    asset TEXT DEFAULT 'USDC',
     status TEXT CHECK (status IN ('pending', 'completed', 'failed')) DEFAULT 'pending',
     tx_hash TEXT,
     reference TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- LEDGER ENTRIES
+CREATE TABLE IF NOT EXISTS ledger_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID REFERENCES transactions(id) ON DELETE CASCADE,
+    debit_account_id UUID REFERENCES balances(id) ON DELETE CASCADE,
+    credit_account_id UUID REFERENCES balances(id) ON DELETE CASCADE,
+    amount NUMERIC(20,6) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
