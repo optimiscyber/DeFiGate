@@ -299,25 +299,21 @@ export const transfer = async (req, res) => {
   try {
     const isEmail = recipientInput.includes('@');
     const whereClause = isEmail
-      ? { email: recipientInput }
+      ? { email: recipientInput.toLowerCase() }
       : { phone: recipientInput };
 
-    const receiverUsers = await User.findAll({
+    const receiverUser = await User.findOne({
       where: whereClause,
-      limit: 2,
     });
 
-    if (receiverUsers.length === 0) {
+    if (!receiverUser) {
       return respondError(res, 404, "Recipient not found", false);
     }
 
-    if (receiverUsers.length > 1) {
-      console.error("transfer recipient ambiguity", recipientInput, receiverUsers.map((u) => u.id));
-      return respondError(res, 500, "Multiple recipients found", false);
-    }
-
-    const receiverUser = receiverUsers[0];
     const receiverId = receiverUser.id;
+    if (!receiverId || typeof receiverId !== 'string' || receiverId.includes('@')) {
+      throw new Error('CRITICAL: receiverId is not a UUID');
+    }
 
     if (senderId === receiverId) {
       return respondError(res, 400, "Cannot transfer to yourself", false);
@@ -338,6 +334,17 @@ export const transfer = async (req, res) => {
       senderId,
       receiverId,
       recipientInput,
+      typeOfReceiverId: typeof receiverId,
+    });
+
+    if (receiverId.includes("@")) {
+      throw new Error("CRITICAL: receiverId is not a UUID");
+    }
+
+    console.log("FINAL TRANSFER DATA:", {
+      senderId: req.user.id,
+      receiverId,
+      type: typeof receiverId,
     });
 
     const transferRecord = await transferFunds(senderId, receiverId, amountString, {
