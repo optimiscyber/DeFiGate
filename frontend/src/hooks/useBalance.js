@@ -14,9 +14,10 @@ export function useBalance(userId) {
 
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch(apiUrl('/user/profile'), {
+      const response = await fetch(apiUrl('/user/me'), {
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
 
@@ -25,8 +26,8 @@ export function useBalance(userId) {
       }
 
       const data = await response.json();
-      if (data.ok && data.data) {
-        setBalance(Number(data.data.available_balance || 0));
+      if (data.ok && data.data?.user) {
+        setBalance(Number(data.data.user.available_balance || 0));
       }
     } catch (err) {
       console.error('Balance fetch error:', err);

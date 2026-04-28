@@ -314,7 +314,7 @@ function App() {
               <h1>Welcome to DeFiGate</h1>
               <p>Your gateway to DeFi in Africa</p>
               <button className="btn btn-primary" onClick={() => setCurrentView('signup')}>
-                Create your profile
+                Sign up
               </button>
               <p className="auth-cta">
                 Already have an account?{' '}
