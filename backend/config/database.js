@@ -3,7 +3,13 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
+const databaseUrl = process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL or LOCAL_DATABASE_URL must be defined in environment variables.");
+}
+
+const useSsl = !databaseUrl.includes("localhost") && !databaseUrl.includes("127.0.0.1");
+const sequelize = new Sequelize(databaseUrl, {
   dialect: "postgres",
   logging: process.env.NODE_ENV === "development" ? console.log : false,
   pool: {
@@ -12,12 +18,14 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     acquire: 30000,
     idle: 10000,
   },
-  dialectOptions: {
-    ssl: {
-      require: true,
-      rejectUnauthorized: false,
-    },
-  },
+  dialectOptions: useSsl
+    ? {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false,
+        },
+      }
+    : {},
 });
 
 export default sequelize;
