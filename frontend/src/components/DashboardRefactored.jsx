@@ -28,10 +28,11 @@ function DashboardRefactored({ currentUser, navigateTo }) {
       let endpoint, payload;
 
       if (transferData.type === 'user') {
-        // Internal user transfer: send recipient identifier directly to the transfer endpoint
+        // Internal user transfer: include both generic and email identifiers for compatibility
         endpoint = apiUrl('/transfer');
         payload = {
           recipient: transferData.recipient,
+          recipientEmail: transferData.recipient,
           amount: transferData.amount,
           asset: transferData.token || 'USDC',
         };

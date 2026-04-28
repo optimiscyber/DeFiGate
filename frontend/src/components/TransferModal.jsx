@@ -143,14 +143,14 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
             <form onSubmit={handleSubmit} className="transfer-form">
               <div className="form-group">
                 <label>
-                  {transferType === 'user' ? 'Recipient Email or ID' : 'Recipient Address'}
+                  {transferType === 'user' ? 'Recipient (phone, email, or user ID)' : 'Recipient Address'}
                 </label>
                 <input
                   type="text"
                   name="recipient"
                   value={formData.recipient}
                   onChange={handleInputChange}
-                  placeholder={transferType === 'user' ? 'user@example.com' : '0x...'}
+                  placeholder={transferType === 'user' ? 'phone, email, or user ID' : '0x...'}
                   required
                 />
               </div>

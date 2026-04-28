@@ -280,14 +280,14 @@ function App() {
     }
   };
 
-  const sendInternalTransfer = async (recipientIdentifier, amount, asset = 'USDC') => {
+  const sendInternalTransfer = async (recipientIdentifier, amount, asset = 'USDC', recipientId = null) => {
     if (!currentUser) {
       toast("Please sign in first", "error");
       setAuthModalOpen(true);
       return;
     }
 
-    if (!recipientIdentifier) {
+    if (!recipientIdentifier && !recipientId) {
       toast("Please select a recipient", "error");
       return;
     }
@@ -299,17 +299,25 @@ function App() {
 
     try {
       const token = localStorage.getItem('authToken');
+      const body = {
+        amount: parseFloat(amount),
+        asset,
+      };
+      if (recipientIdentifier) {
+        body.recipient = recipientIdentifier;
+        body.recipientEmail = recipientIdentifier;
+      }
+      if (recipientId) {
+        body.recipientId = recipientId;
+      }
+
       const res = await fetch(apiUrl('/transfer'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          recipient: recipientIdentifier,
-          amount: parseFloat(amount),
-          asset,
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();

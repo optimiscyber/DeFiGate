@@ -79,7 +79,8 @@ const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navi
 
     try {
       const recipientIdentifier = selectedUser?.email || searchQuery;
-      const transfer = await internalTransfer(recipientIdentifier, formData.amount, 'USDC');
+      const recipientId = selectedUser?.id;
+      const transfer = await internalTransfer(recipientIdentifier, formData.amount, 'USDC', recipientId);
       if (!transfer) {
         setCurrentStep('form');
         return;
