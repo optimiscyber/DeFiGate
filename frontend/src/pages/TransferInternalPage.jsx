@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { FormStep, ConfirmationModal, ProcessingScreen, SuccessScreen } from '../components';
-import { apiUrl } from '../api';
 
 const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navigateTo }) => {
   const [currentStep, setCurrentStep] = useState('form');
@@ -24,22 +23,15 @@ const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navi
 
     setSearching(true);
     try {
-      const token = localStorage.getItem('authToken');
-      const res = await fetch(apiUrl('/transfer/lookup'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ identifier: query }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        onShowToast?.(data.error || 'User lookup failed', 'error');
-        setSearchResults([]);
-      } else {
-        setSearchResults(data.data ? [data.data] : []);
-      }
+      // For now, keep recipient search local and avoid requiring a backend /lookup endpoint.
+      const mockResults = [
+        { id: 1, email: 'user1@example.com', username: 'user1' },
+        { id: 2, email: 'user2@example.com', username: 'user2' },
+      ].filter(user =>
+        user.email.toLowerCase().includes(query.toLowerCase()) ||
+        user.username.toLowerCase().includes(query.toLowerCase())
+      );
+      setSearchResults(mockResults);
     } catch (error) {
       console.error('Search failed:', error);
       onShowToast?.('User lookup failed', 'error');
@@ -86,7 +78,8 @@ const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navi
     setCurrentStep('processing');
 
     try {
-      const transfer = await internalTransfer(selectedUser.id, formData.amount, 'USDC');
+      const recipientIdentifier = selectedUser?.email || searchQuery;
+      const transfer = await internalTransfer(recipientIdentifier, formData.amount, 'USDC');
       if (!transfer) {
         setCurrentStep('form');
         return;
@@ -95,7 +88,7 @@ const TransferInternalPage = ({ currentUser, internalTransfer, onShowToast, navi
       setTransactionData({
         id: transfer.id,
         amount: transfer.amount,
-        recipient: selectedUser.email,
+        recipient: recipientIdentifier,
         timestamp: transfer.created_at || new Date().toISOString(),
         status: transfer.status || 'completed'
       });

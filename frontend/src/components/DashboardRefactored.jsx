@@ -28,24 +28,10 @@ function DashboardRefactored({ currentUser, navigateTo }) {
       let endpoint, payload;
 
       if (transferData.type === 'user') {
-        // Internal user transfer: resolve recipient identifier then post to new transfer endpoint
-        const lookupRes = await fetch(apiUrl('/transfer/lookup'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ identifier: transferData.recipient }),
-        });
-
-        const lookupData = await lookupRes.json();
-        if (!lookupRes.ok) {
-          throw new Error(lookupData.error || 'Recipient lookup failed');
-        }
-
+        // Internal user transfer: send recipient identifier directly to the transfer endpoint
         endpoint = apiUrl('/transfer');
         payload = {
-          toUserId: lookupData.data.id,
+          recipient: transferData.recipient,
           amount: transferData.amount,
           asset: transferData.token || 'USDC',
         };

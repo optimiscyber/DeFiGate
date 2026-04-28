@@ -257,19 +257,45 @@ export const confirmTransfer = async (req, res) => {
 
 export const transfer = async (req, res) => {
   const senderId = req.user?.id;
-  const { toUserId, amount, asset } = req.body;
+  const { toUserId, recipientId, recipient, recipientEmail, recipientPhone, amount, asset } = req.body;
   const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"] || req.headers["idempotency_key"];
 
   if (!senderId) {
     return respondError(res, 401, "Not authenticated", false);
   }
 
-  if (!toUserId || !amount) {
-    return respondError(res, 400, "toUserId and amount are required", false);
+  if (!amount || (!toUserId && !recipientId && !recipient && !recipientEmail && !recipientPhone)) {
+    return respondError(res, 400, "Recipient and amount are required", false);
   }
 
+  let resolvedReceiverId = toUserId || recipientId;
   try {
-    const transfer = await transferFunds(senderId, toUserId, amount, {
+    if (!resolvedReceiverId) {
+      const identifier = String(recipient || recipientEmail || recipientPhone || "").trim();
+      if (!identifier) {
+        return respondError(res, 400, "Recipient identifier is required", false);
+      }
+
+      const normalizedEmail = identifier.toLowerCase();
+      const normalizedPhone = identifier.replace(/[^0-9]/g, "");
+      const lookupResult = await pool.query(
+        `SELECT id FROM users
+         WHERE id = $1
+           OR LOWER(email) = $2
+           OR phone = $3
+           OR regexp_replace(phone, '[^0-9]', '', 'g') = $4
+         LIMIT 1`,
+        [identifier, normalizedEmail, identifier, normalizedPhone]
+      );
+
+      if (lookupResult.rows.length === 0) {
+        return respondError(res, 404, "Recipient not found", false);
+      }
+
+      resolvedReceiverId = lookupResult.rows[0].id;
+    }
+
+    const transfer = await transferFunds(senderId, resolvedReceiverId, amount, {
       asset,
       idempotencyKey,
     });

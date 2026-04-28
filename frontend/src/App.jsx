@@ -280,14 +280,14 @@ function App() {
     }
   };
 
-  const sendInternalTransfer = async (recipientId, amount, asset = 'USDC') => {
+  const sendInternalTransfer = async (recipientIdentifier, amount, asset = 'USDC') => {
     if (!currentUser) {
       toast("Please sign in first", "error");
       setAuthModalOpen(true);
       return;
     }
 
-    if (!recipientId) {
+    if (!recipientIdentifier) {
       toast("Please select a recipient", "error");
       return;
     }
@@ -306,7 +306,7 @@ function App() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          toUserId: recipientId,
+          recipient: recipientIdentifier,
           amount: parseFloat(amount),
           asset,
         }),
