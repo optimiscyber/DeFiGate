@@ -23,8 +23,7 @@ import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import SignupPage from './pages/SignupPage'
 import TestPanel from './pages/TestPanel'
-
-const API = '/api';
+import { apiUrl } from './api'
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -76,7 +75,7 @@ function App() {
     const endpoint = authMode === "signin" ? "/user/signin" : "/user/signup";
 
     try {
-      const res = await fetch(`${API}${endpoint}`, {
+      const res = await fetch(apiUrl(endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -129,7 +128,7 @@ function App() {
     }
 
     try {
-      const res = await fetch(`${API}/wallet/create`, {
+      const res = await fetch(apiUrl('/wallet/create'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +166,7 @@ function App() {
     }
 
     try {
-      const res = await fetch(`${API}/ramp/onramp`, {
+      const res = await fetch(apiUrl('/ramp/onramp'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -209,7 +208,7 @@ function App() {
     }
 
     try {
-      const res = await fetch(`${API}/ramp/offramp`, {
+      const res = await fetch(apiUrl('/ramp/offramp'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -256,7 +255,7 @@ function App() {
     }
 
     try {
-      const res = await fetch(`${API}/wallet/send`, {
+      const res = await fetch(apiUrl('/wallet/send'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

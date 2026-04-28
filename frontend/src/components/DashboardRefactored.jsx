@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import TransferModal from './TransferModal';
 import { useBalance } from '../hooks/useBalance';
+import { apiUrl } from '../api';
 
 function DashboardRefactored({ currentUser, navigateTo }) {
   const [copied, setCopied] = useState(false);
@@ -28,7 +29,7 @@ function DashboardRefactored({ currentUser, navigateTo }) {
 
       if (transferData.type === 'user') {
         // Internal user transfer
-        endpoint = '/transfer/initiate';
+        endpoint = apiUrl('/transfer/initiate');
         payload = {
           recipientId: transferData.recipient, // This should be user ID
           amount: transferData.amount,
@@ -37,7 +38,7 @@ function DashboardRefactored({ currentUser, navigateTo }) {
         };
       } else {
         // External wallet transfer
-        endpoint = '/wallet/send';
+        endpoint = apiUrl('/wallet/send');
         payload = {
           toAddress: transferData.recipient,
           amount: transferData.amount,

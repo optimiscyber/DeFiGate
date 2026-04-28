@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 const Dashboard = ({ user, onShowToast }) => {
   const [balance, setBalance] = useState('0.00');
@@ -13,7 +14,7 @@ const Dashboard = ({ user, onShowToast }) => {
 
   const fetchBalance = async () => {
     try {
-      const response = await fetch(`/api/wallet/balance?address=${user.walletAddress}`, {
+      const response = await fetch(apiUrl(`/wallet/balance?address=${user.walletAddress}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         },
@@ -36,7 +37,7 @@ const Dashboard = ({ user, onShowToast }) => {
 
   const fetchTransactions = async () => {
     try {
-      const response = await fetch(`/api/transfer/history?address=${user.walletAddress}`, {
+      const response = await fetch(apiUrl(`/transfer/history?address=${user.walletAddress}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         },

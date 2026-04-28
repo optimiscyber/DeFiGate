@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 export function useBalance(userId) {
   const [balance, setBalance] = useState(0);
@@ -13,7 +14,7 @@ export function useBalance(userId) {
 
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch('/api/user/profile', {
+      const response = await fetch(apiUrl('/user/profile'), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

@@ -3,6 +3,7 @@ import './App.css';
 import TopNav from './components/TopNav';
 import BottomNav from './components/BottomNav';
 import Dashboard from './pages/Dashboard';
+import { apiUrl } from './api';
 import TransferPage from './pages/TransferPage';
 import RampPage from './pages/RampPage';
 import WalletPage from './pages/WalletPage';
@@ -74,7 +75,7 @@ function App() {
 
   const checkBackendStatus = async () => {
     try {
-      const response = await fetch('/api/health', {
+      const response = await fetch(apiUrl('/health'), {
         method: 'GET',
         timeout: 5000,
       });

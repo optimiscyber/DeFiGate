@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../api';
 
 const SignupPage = ({ onAuthenticated, onShowToast, onCancel }) => {
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,7 @@ const SignupPage = ({ onAuthenticated, onShowToast, onCancel }) => {
     }
 
     try {
-      const response = await fetch('/api/user/signup', {
+      const response = await fetch(apiUrl('/user/signup'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

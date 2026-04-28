@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../api';
 
 const RampPage = ({ user, onShowToast }) => {
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,7 @@ const RampPage = ({ user, onShowToast }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/ramp/initiate', {
+      const response = await fetch(apiUrl('/ramp/initiate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

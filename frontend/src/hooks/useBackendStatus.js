@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 export function useBackendStatus() {
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online', 'offline', 'checking'
@@ -6,7 +7,7 @@ export function useBackendStatus() {
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const response = await fetch('/api/health');
+        const response = await fetch(apiUrl('/health'));
         if (response.ok) {
           setBackendStatus('online');
         } else {

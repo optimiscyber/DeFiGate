@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../api';
 
 const AuthModal = ({ onAuthenticated, onShowToast }) => {
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/user/signin', {
+      const response = await fetch(apiUrl('/user/signin'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -69,7 +70,7 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/user/signup', {
+      const response = await fetch(apiUrl('/user/signup'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

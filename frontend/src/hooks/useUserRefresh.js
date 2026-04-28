@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { apiUrl } from '../api';
 
 /**
  * Hook to refresh user state from the server
@@ -10,7 +11,7 @@ export const useUserRefresh = () => {
       const token = localStorage.getItem('authToken');
       if (!token) return null;
 
-      const res = await fetch('/api/user/me', {
+      const res = await fetch(apiUrl('/user/me'), {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

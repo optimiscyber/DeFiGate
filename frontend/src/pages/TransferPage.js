@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../api';
 
 const TransferPage = ({ user, onShowToast }) => {
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,7 @@ const TransferPage = ({ user, onShowToast }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/transfer/send', {
+      const response = await fetch(apiUrl('/transfer/send'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

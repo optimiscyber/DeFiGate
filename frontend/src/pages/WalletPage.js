@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 const WalletPage = ({ user, onShowToast }) => {
   const [walletInfo, setWalletInfo] = useState(null);
@@ -12,7 +13,7 @@ const WalletPage = ({ user, onShowToast }) => {
 
   const fetchWalletInfo = async () => {
     try {
-      const response = await fetch(`/api/wallet/info?address=${user.walletAddress}`, {
+      const response = await fetch(apiUrl(`/wallet/info?address=${user.walletAddress}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         },
@@ -32,7 +33,7 @@ const WalletPage = ({ user, onShowToast }) => {
 
   const fetchTokens = async () => {
     try {
-      const response = await fetch(`/api/wallet/tokens?address=${user.walletAddress}`, {
+      const response = await fetch(apiUrl(`/wallet/tokens?address=${user.walletAddress}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         },
