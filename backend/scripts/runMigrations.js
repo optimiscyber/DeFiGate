@@ -26,14 +26,8 @@ async function runMigrations() {
       const filePath = path.join(migrateDir, file);
       const sql = fs.readFileSync(filePath, 'utf8');
 
-      // Split by semicolon and execute each statement
-      const statements = sql.split(';').filter(stmt => stmt.trim().length > 0);
-
-      for (const statement of statements) {
-        if (statement.trim()) {
-          await pool.query(statement);
-        }
-      }
+      // Execute the full SQL file as a single batch. PostgreSQL supports multiple statements in one query.
+      await pool.query(sql);
 
       console.log(`✅ Migration ${file} completed`);
     }

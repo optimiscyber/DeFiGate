@@ -9,8 +9,20 @@ UPDATE balances
 ALTER TABLE balances
   DROP CONSTRAINT IF EXISTS balances_user_id_key;
 
-ALTER TABLE balances
-  ADD CONSTRAINT IF NOT EXISTS unique_user_asset UNIQUE (user_id, asset);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'unique_user_asset'
+  ) THEN
+    ALTER TABLE balances ADD CONSTRAINT unique_user_asset UNIQUE (user_id, asset);
+  END IF;
+END$$;
 
-ALTER TABLE balances
-  ADD CONSTRAINT IF NOT EXISTS chk_available_balance_nonnegative CHECK (available_balance >= 0);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_available_balance_nonnegative'
+  ) THEN
+    ALTER TABLE balances ADD CONSTRAINT chk_available_balance_nonnegative CHECK (available_balance >= 0);
+  END IF;
+END$$;

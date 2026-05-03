@@ -1,0 +1,34 @@
+name: Auto Commit Changes
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Run at minute 0 every hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  auto-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes if any
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "chore: auto commit changes from scheduled workflow"
+          git push origin HEAD:$(echo "${GITHUB_REF#refs/heads/}")
