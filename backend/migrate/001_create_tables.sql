@@ -66,6 +66,27 @@ CREATE TABLE IF NOT EXISTS transfers (
   PRIMARY KEY (id)
 );
 
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS recipient_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS amount NUMERIC(36,18);
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(20);
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS chain VARCHAR(50);
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS tx_hash TEXT;
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS wallet_id UUID REFERENCES wallets(id);
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS metadata JSONB;
+ALTER TABLE transfers
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+
 CREATE INDEX IF NOT EXISTS idx_transfers_sender_id ON transfers(sender_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_recipient_id ON transfers(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_status ON transfers(status);
