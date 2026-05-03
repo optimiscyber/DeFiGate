@@ -54,11 +54,11 @@ export const signup = async (req, res) => {
     );
     user.is_verified = true;
 
-    // Create balance record with test net balance
+    // Create balance record with zero starting funds
     try {
       await Balance.create({
         user_id: user.id,
-        available_balance: 100.0, // Test net balance for transaction testing
+        available_balance: 0.0,
       });
     } catch (err) {
       console.error("Balance creation error", err);
@@ -84,7 +84,7 @@ export const signup = async (req, res) => {
         company: user.company,
         is_verified: user.is_verified,
         kyc_status: user.kyc_status,
-        available_balance: 100.0,
+        available_balance: 0.0,
         wallet,
       },
       token,
@@ -241,22 +241,23 @@ export const topup = async (req, res) => {
   try {
     await pool.query('BEGIN');
     const balanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1 FOR UPDATE`,
+      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
       [userId]
     );
     if (balanceResult.rows.length === 0) {
       await pool.query('ROLLBACK');
       return respondError(res, 404, "Balance not found", false);
     }
-    const currentBalance = parseFloat(balanceResult.rows[0].balance);
+    const currentBalance = parseFloat(balanceResult.rows[0].available_balance);
     const newBalance = currentBalance + parseFloat(amount);
     await pool.query(
-      `UPDATE balances SET balance = $1 WHERE user_id = $2`,
+      `UPDATE balances SET available_balance = $1 WHERE user_id = $2`,
       [newBalance, userId]
     );
     await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, description) VALUES ($1, $2, $3, $4, $5)`,
-      [userId, 'topup', amount, newBalance, 'Test topup']
+      `INSERT INTO transactions (user_id, type, amount, asset, status, reference)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, 'deposit', amount, 'USDC', 'completed', 'topup']
     );
     await pool.query('COMMIT');
     return respondSuccess(res, { balance: newBalance }, "Topup successful");
@@ -368,6 +369,24 @@ export const getTransactions = async (req, res) => {
   }
 };
 
+export const getBalances = async (req, res) => {
+  const user = req.user;
+
+  try {
+    const balancesResult = await pool.query(
+      `SELECT asset, available_balance, pending_balance, updated_at
+       FROM balances
+       WHERE user_id = $1`,
+      [user.id]
+    );
+
+    return respondSuccess(res, { balances: balancesResult.rows }, "Balances retrieved");
+  } catch (err) {
+    console.error("getBalances error", err);
+    return respondError(res, 500, "Failed to retrieve balances", true, err.message);
+  }
+};
+
 export const getMe = async (req, res) => {
   const user = req.user;
   if (!user) {
@@ -376,7 +395,7 @@ export const getMe = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.balance_usd, u.is_verified, b.available_balance
+      `SELECT u.id, u.email, u.is_verified, b.available_balance
        FROM users u
        LEFT JOIN balances b ON u.id = b.user_id
        WHERE u.id = $1`,
@@ -401,7 +420,6 @@ export const getMe = async (req, res) => {
         user: {
           id: fullUser.id,
           email: fullUser.email,
-          balance_usd: fullUser.balance_usd,
           available_balance: Number(fullUser.available_balance || 0),
           is_verified: fullUser.is_verified,
           wallet,

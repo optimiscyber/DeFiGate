@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS users (
     preferred_chain VARCHAR(255) DEFAULT 'solana',
     privy_wallet_id VARCHAR(255),
     status VARCHAR(255) DEFAULT 'active',
-    balance_usd DECIMAL(18, 2) DEFAULT 100.00,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -29,10 +28,13 @@ CREATE TABLE IF NOT EXISTS users (
 -- Balances table
 CREATE TABLE IF NOT EXISTS balances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    asset VARCHAR(50) NOT NULL DEFAULT 'USDC',
     available_balance DECIMAL(20, 6) DEFAULT 0,
     pending_balance DECIMAL(20, 6) DEFAULT 0,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_user_asset UNIQUE (user_id, asset),
+    CONSTRAINT chk_available_balance_nonnegative CHECK (available_balance >= 0)
 );
 
 -- Wallets table
@@ -58,7 +60,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     status VARCHAR(255) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
     tx_hash VARCHAR(255),
     reference VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_transaction_hash UNIQUE (tx_hash)
 );
 
 -- Ledger entries table

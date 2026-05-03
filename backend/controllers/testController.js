@@ -27,7 +27,7 @@ export const depositTestFunds = async (req, res) => {
     if (existing.rows.length > 0) {
       const existingTx = existing.rows[0];
       const balanceResult = await pool.query(
-        `SELECT balance FROM balances WHERE user_id = $1`,
+        `SELECT available_balance FROM balances WHERE user_id = $1`,
         [userId]
       );
 
@@ -35,7 +35,7 @@ export const depositTestFunds = async (req, res) => {
         ok: true,
         data: {
           transaction: existingTx,
-          available_balance: Number(balanceResult.rows[0]?.balance || 0),
+          available_balance: Number(balanceResult.rows[0]?.available_balance || 0),
           message: "Existing deposit returned",
         },
       });
@@ -44,29 +44,33 @@ export const depositTestFunds = async (req, res) => {
     await pool.query('BEGIN');
 
     let balanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1`,
+      `SELECT available_balance FROM balances WHERE user_id = $1`,
       [userId]
     );
 
     if (balanceResult.rows.length === 0) {
       await pool.query(
-        `INSERT INTO balances (user_id, balance) VALUES ($1, $2)`,
+        `INSERT INTO balances (user_id, available_balance) VALUES ($1, $2)`,
         [userId, 0]
+      );
+      balanceResult = await pool.query(
+        `SELECT available_balance FROM balances WHERE user_id = $1`,
+        [userId]
       );
     }
 
-    const currentBalance = Number(balanceResult.rows[0]?.balance || 0);
+    const currentBalance = Number(balanceResult.rows[0]?.available_balance || 0);
     const newBalance = currentBalance + depositAmount;
 
     const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, description, reference, tx_hash, status)
+      `INSERT INTO transactions (user_id, type, amount, asset, description, reference, tx_hash, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, amount, status`,
       [
         userId,
         'deposit',
         depositAmount,
-        newBalance,
+        'USDC',
         `Test deposit of $${depositAmount}`,
         txReference,
         `solana-deposit-${Date.now()}`,
@@ -75,14 +79,14 @@ export const depositTestFunds = async (req, res) => {
     );
 
     await pool.query(
-      `UPDATE balances SET balance = balance + $1 WHERE user_id = $2`,
+      `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
       [depositAmount, userId]
     );
 
     await pool.query('COMMIT');
 
     const newBalanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1`,
+      `SELECT available_balance FROM balances WHERE user_id = $1`,
       [userId]
     );
 
@@ -90,7 +94,7 @@ export const depositTestFunds = async (req, res) => {
       ok: true,
       data: {
         transaction: transactionResult.rows[0],
-        available_balance: Number(newBalanceResult.rows[0]?.balance || 0),
+        available_balance: Number(newBalanceResult.rows[0]?.available_balance || 0),
       },
       message: "Test deposit applied",
     });

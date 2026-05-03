@@ -194,7 +194,7 @@ export const confirmTransfer = async (req, res) => {
     await pool.query("BEGIN");
 
     const senderBalanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1 FOR UPDATE`,
+      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
       [senderId]
     );
 
@@ -203,7 +203,7 @@ export const confirmTransfer = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Sender balance not found" });
     }
 
-    const senderBalance = Number(senderBalanceResult.rows[0].balance || 0);
+    const senderBalance = Number(senderBalanceResult.rows[0].available_balance || 0);
     const transferAmount = Number(transfer.amount || 0);
 
     if (Number.isNaN(transferAmount) || transferAmount <= 0) {
@@ -217,7 +217,7 @@ export const confirmTransfer = async (req, res) => {
     }
 
     const recipientBalanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1 FOR UPDATE`,
+      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
       [transfer.recipient_id]
     );
 
@@ -227,12 +227,12 @@ export const confirmTransfer = async (req, res) => {
     }
 
     await pool.query(
-      `UPDATE balances SET balance = balance - $1 WHERE user_id = $2`,
+      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
       [transferAmount, senderId]
     );
 
     await pool.query(
-      `UPDATE balances SET balance = balance + $1 WHERE user_id = $2`,
+      `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
       [transferAmount, transfer.recipient_id]
     );
 
@@ -451,31 +451,30 @@ export const withdraw = async (req, res) => {
     await pool.query('BEGIN');
 
     const balanceResult = await pool.query(
-      `SELECT balance FROM balances WHERE user_id = $1 FOR UPDATE`,
+      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
       [userId]
     );
-    if (balanceResult.rows.length === 0 || Number(balanceResult.rows[0].balance) < withdrawAmount) {
+    if (balanceResult.rows.length === 0 || Number(balanceResult.rows[0].available_balance) < withdrawAmount) {
       await pool.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: "Insufficient balance" });
     }
 
     const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, description, reference, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO transactions (user_id, type, amount, asset, reference, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
       [
         userId,
         'withdrawal',
         withdrawAmount,
-        Number(balanceResult.rows[0].balance) - withdrawAmount,
-        `Withdrawal to ${toAddress}`,
+        'USDC',
         `withdrawal to ${toAddress}`,
         'pending'
       ]
     );
 
     await pool.query(
-      `UPDATE balances SET balance = balance - $1 WHERE user_id = $2`,
+      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
       [withdrawAmount, userId]
     );
 
@@ -487,7 +486,7 @@ export const withdraw = async (req, res) => {
       // Refund
       await pool.query('BEGIN');
       await pool.query(
-        `UPDATE balances SET balance = balance + $1 WHERE user_id = $2`,
+        `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
         [withdrawAmount, userId]
       );
       await pool.query(

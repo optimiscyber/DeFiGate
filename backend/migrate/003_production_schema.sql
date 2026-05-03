@@ -12,10 +12,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS balances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    asset TEXT NOT NULL DEFAULT 'USDC',
     available_balance NUMERIC(20,6) DEFAULT 0,
     pending_balance NUMERIC(20,6) DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id)
+    CONSTRAINT unique_user_asset UNIQUE (user_id, asset),
+    CONSTRAINT chk_available_balance_nonnegative CHECK (available_balance >= 0)
 );
 
 -- TRANSACTIONS
@@ -28,7 +30,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     status TEXT CHECK (status IN ('pending', 'completed', 'failed')) DEFAULT 'pending',
     tx_hash TEXT,
     reference TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tx_hash)
 );
 
 -- LEDGER ENTRIES

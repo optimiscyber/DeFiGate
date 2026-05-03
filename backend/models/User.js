@@ -64,10 +64,6 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       defaultValue: 'active',
     },
-    balance_usd: {
-      type: DataTypes.DECIMAL(18, 2),
-      defaultValue: 100.00,
-    },
   },
   {
     tableName: "users",
