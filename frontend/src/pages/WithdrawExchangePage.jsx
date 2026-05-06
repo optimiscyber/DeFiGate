@@ -128,16 +128,17 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="tokenAddress">Token Mint Address (Optional)</label>
-            <input
-              type="text"
+            <label htmlFor="tokenAddress">Token</label>
+            <select
               id="tokenAddress"
               name="tokenAddress"
               value={formData.tokenAddress}
               onChange={handleInputChange}
-              placeholder="Leave empty to send SOL"
-            />
-            <small className="form-hint">Leave empty to send native SOL</small>
+            >
+              <option value="">SOL (Native)</option>
+              <option value="USDC">USDC (SPL Token)</option>
+            </select>
+            <small className="form-hint">Select SOL for native token or USDC for stablecoin</small>
           </div>
 
           <div className="withdrawal-warning">
@@ -162,7 +163,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
           { label: 'Recipient', value: `${formData.recipientAddress.substring(0, 12)}...${formData.recipientAddress.substring(-8)}` },
           { label: 'Amount', value: formData.amount },
           { label: 'Network', value: wallet.chain?.toUpperCase() || 'SOLANA' },
-          { label: 'Token', value: formData.tokenAddress ? 'SPL Token' : 'SOL' }
+          { label: 'Token', value: formData.tokenAddress === 'USDC' ? 'USDC' : 'SOL' }
         ]}
         onConfirm={handleConfirm}
         onCancel={() => setCurrentStep('form')}

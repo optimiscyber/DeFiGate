@@ -1,6 +1,21 @@
 import axios from "axios";
 import dotenv from "dotenv";
 import pool from "../db.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  LAMPORTS_PER_SOL,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  getAccount,
+  transferChecked,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 dotenv.config();
 
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
@@ -10,6 +25,11 @@ const PRIVY_BASE = "https://api.privy.io";
 const inMemoryWallets = new Map();
 
 const isPrivyEnabled = Boolean(PRIVY_APP_ID && PRIVY_APP_SECRET);
+
+// Solana constants
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const USDC_DECIMALS = 6;
 
 // Privy uses Basic Auth: base64(appId:appSecret)
 function privyHeaders() {
@@ -211,13 +231,6 @@ export const sendTxToAddress = async (req, res) => {
       .json({ ok: false, error: "Only Solana transactions are supported" });
   }
 
-  if (tokenAddress) {
-    return res.status(400).json({
-      ok: false,
-      error: "SPL token transfers are not supported yet. Leave tokenAddress empty to send SOL.",
-    });
-  }
-
   try {
     const providerWalletId = await resolvePrivyWalletId(walletId);
     if (!providerWalletId) {
@@ -226,17 +239,119 @@ export const sendTxToAddress = async (req, res) => {
         .json({ ok: false, error: "Invalid wallet identifier for transaction" });
     }
 
-    // Build a Solana native SOL transaction request for Privy
+    // Connect to Solana
+    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+    // Get wallet details from Privy
+    const walletResponse = await axios.get(
+      `${PRIVY_BASE}/v1/wallets/${providerWalletId}`,
+      { headers: privyHeaders() }
+    );
+    const walletData = walletResponse.data;
+
+    if (!walletData.address) {
+      return res.status(400).json({ ok: false, error: "Wallet address not found" });
+    }
+
+    const senderPublicKey = new PublicKey(walletData.address);
+    const recipientPublicKey = new PublicKey(toAddress);
+
+    let transaction = new Transaction();
+    let signers = [];
+
+    if (tokenAddress) {
+      // Handle SPL token transfer (USDC)
+      const mint = tokenAddress === "USDC" ? USDC_MINT : new PublicKey(tokenAddress);
+
+      // Validate USDC mint
+      if (tokenAddress === "USDC" && !mint.equals(USDC_MINT)) {
+        return res.status(400).json({ ok: false, error: "Invalid USDC mint address" });
+      }
+
+      // Get sender's ATA
+      const senderATA = await getAssociatedTokenAddress(
+        mint,
+        senderPublicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Get recipient's ATA
+      const recipientATA = await getAssociatedTokenAddress(
+        mint,
+        recipientPublicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Check if recipient ATA exists, create if not
+      try {
+        await getAccount(connection, recipientATA);
+      } catch (error) {
+        // ATA doesn't exist, add instruction to create it
+        transaction.add(
+          createAssociatedTokenAccountInstruction(
+            senderPublicKey, // payer
+            recipientATA, // ata
+            recipientPublicKey, // owner
+            mint, // mint
+            TOKEN_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        );
+      }
+
+      // Convert amount to smallest unit
+      const decimals = tokenAddress === "USDC" ? USDC_DECIMALS : 6; // Default to 6 for most tokens
+      const transferAmount = Math.floor(parseFloat(amount) * Math.pow(10, decimals));
+
+      // Add transfer instruction
+      transaction.add(
+        transferChecked(
+          TOKEN_PROGRAM_ID,
+          senderATA, // source
+          mint, // mint
+          recipientATA, // destination
+          senderPublicKey, // owner
+          [], // multiSigners
+          transferAmount, // amount
+          decimals // decimals
+        )
+      );
+    } else {
+      // Handle native SOL transfer
+      const lamports = Math.floor(parseFloat(amount) * LAMPORTS_PER_SOL);
+
+      transaction.add(
+        SystemProgram.transfer({
+          fromPubkey: senderPublicKey,
+          toPubkey: recipientPublicKey,
+          lamports,
+        })
+      );
+    }
+
+    // Get recent blockhash
+    const { blockhash } = await connection.getLatestBlockhash();
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = senderPublicKey;
+
+    // Serialize transaction for Privy
+    const serializedTx = transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+
+    // Send to Privy for signing and broadcasting
     const caip2 = chainToCaip2(chain);
     const txBody = {
       chain_type: "solana",
       method: "solana_signAndSendTransaction",
       caip2,
       params: {
-        transaction: {
-          to: toAddress,
-          value: Math.floor(amount * 1e9),
-        },
+        transaction: serializedTx.toString("base64"),
       },
     };
 

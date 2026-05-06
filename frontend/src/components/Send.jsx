@@ -26,8 +26,11 @@ function Send({ currentUser, sendTokens }) {
             <input type="text" id="sendToAddress" name="toAddress" placeholder="Enter Solana wallet address" required />
           </div>
           <div className="form-group">
-            <label htmlFor="sendTokenAddress">Token Mint Address (optional)</label>
-            <input type="text" id="sendTokenAddress" name="tokenAddress" placeholder="Leave empty to send SOL" />
+            <label htmlFor="sendTokenAddress">Token</label>
+            <select id="sendTokenAddress" name="tokenAddress">
+              <option value="">SOL (Native)</option>
+              <option value="USDC">USDC (SPL Token)</option>
+            </select>
           </div>
           <div className="form-row">
             <div className="form-group">
