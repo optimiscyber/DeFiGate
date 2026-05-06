@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FormStep, ConfirmationModal, ProcessingScreen, SuccessScreen } from '../components';
+import { apiUrl } from '../api';
 
-const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
+const WithdrawExchangePage = ({ currentUser, navigateTo }) => {
   const [currentStep, setCurrentStep] = useState('form');
   const wallet = currentUser?.wallet;
   const [formData, setFormData] = useState({
@@ -11,6 +12,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
   });
   const [transactionData, setTransactionData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [transactionId, setTransactionId] = useState(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -37,18 +39,36 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
     setCurrentStep('processing');
 
     try {
-      const data = await sendTokens(
-        formData.recipientAddress,
-        formData.tokenAddress || undefined,
-        formData.amount
-      );
-      if (data) {
-        setTransactionData(data);
-        setCurrentStep('success');
-      } else {
-        setCurrentStep('form');
+      // Generate idempotency key
+      const idempotencyKey = `withdraw_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('/transfer/withdraw'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          amount: formData.amount,
+          toAddress: formData.recipientAddress,
+          walletId: wallet.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.ok) {
+        throw new Error(data.error || 'Withdrawal failed');
       }
+
+      setTransactionId(data.data.transactionId);
+      setTransactionData(data.data);
+      setCurrentStep('success');
     } catch (error) {
+      console.error('Withdrawal error:', error);
+      alert(`Withdrawal failed: ${error.message}`);
       setCurrentStep('form');
     } finally {
       setLoading(false);
@@ -186,12 +206,13 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
   if (currentStep === 'success') {
     return (
       <SuccessScreen
-        title="Withdrawal Successful"
-        message="Your crypto has been sent successfully"
+        title="Withdrawal Initiated"
+        message="Your withdrawal has been broadcasted and is being processed"
         details={[
-          { label: 'Amount', value: formData.amount },
-          { label: 'Network', value: wallet.chain?.toUpperCase() || 'SOLANA' },
-          { label: 'Status', value: 'Completed' }
+          { label: 'Amount', value: `${formData.amount} USDC` },
+          { label: 'Recipient', value: `${formData.recipientAddress.substring(0, 12)}...${formData.recipientAddress.substring(-8)}` },
+          { label: 'Status', value: transactionData?.status || 'Processing' },
+          { label: 'Transaction ID', value: transactionId || 'N/A' }
         ]}
         transactionId={transactionData?.txHash}
         onDone={() => navigateTo('dashboard')}

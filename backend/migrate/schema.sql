@@ -93,5 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_transfers_sender_id ON transfers(sender_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_receiver_id ON transfers(receiver_id);
 
 -- Add constraints to prevent self-transfers
-ALTER TABLE transfers ADD CONSTRAINT check_sender_receiver_different
-    CHECK (sender_id != receiver_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+                   WHERE constraint_name = 'check_sender_receiver_different'
+                   AND table_name = 'transfers') THEN
+        ALTER TABLE transfers ADD CONSTRAINT check_sender_receiver_different
+            CHECK (sender_id != receiver_id);
+    END IF;
+END $$;

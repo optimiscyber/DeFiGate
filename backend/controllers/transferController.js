@@ -8,7 +8,7 @@ import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 import { respondError, respondSuccess } from "../utils/response.js";
-import { transferFunds } from "../services/transferService.js";
+import { processUSDCWithdrawal, getWithdrawalStatus } from "../services/withdrawalService.js";
 dotenv.config();
 
 const inMemoryTransfers = new Map();
@@ -432,94 +432,84 @@ function simulateSolanaWithdrawal(toAddress, amount) {
 
 export const withdraw = async (req, res) => {
   const userId = req.user?.id;
-  const { amount, toAddress, chain = "solana" } = req.body;
+  const { amount, toAddress, walletId } = req.body;
+  const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"];
 
   if (!userId) {
     return res.status(401).json({ ok: false, error: "Not authenticated" });
   }
 
-  if (chain !== "solana") {
-    return res.status(400).json({ ok: false, error: "Only Solana withdrawals are supported" });
+  if (!idempotencyKey) {
+    return res.status(400).json({ ok: false, error: "Idempotency-Key header is required" });
+  }
+
+  if (!amount || !toAddress || !walletId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing required fields: amount, toAddress, walletId"
+    });
   }
 
   const withdrawAmount = parseFloat(amount);
-  if (!withdrawAmount || withdrawAmount <= 0 || !toAddress) {
-    return res.status(400).json({ ok: false, error: "Valid amount and Solana address required" });
+  if (!withdrawAmount || withdrawAmount <= 0) {
+    return res.status(400).json({ ok: false, error: "Valid amount required" });
+  }
+
+  // Basic Solana address validation
+  try {
+    new PublicKey(toAddress);
+  } catch (error) {
+    return res.status(400).json({ ok: false, error: "Invalid Solana address" });
   }
 
   try {
-    await pool.query('BEGIN');
-
-    const balanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [userId]
-    );
-    if (balanceResult.rows.length === 0 || Number(balanceResult.rows[0].available_balance) < withdrawAmount) {
-      await pool.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: "Insufficient balance" });
-    }
-
-    const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, asset, reference, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [
-        userId,
-        'withdrawal',
-        withdrawAmount,
-        'USDC',
-        `withdrawal to ${toAddress}`,
-        'pending'
-      ]
-    );
-
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
-      [withdrawAmount, userId]
-    );
-
-    await pool.query('COMMIT');
-
-    const result = await simulateSolanaWithdrawal(toAddress, withdrawAmount);
-
-    if (!result.success) {
-      // Refund
-      await pool.query('BEGIN');
-      await pool.query(
-        `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
-        [withdrawAmount, userId]
-      );
-      await pool.query(
-        `UPDATE transactions SET status = $1, tx_hash = $2 WHERE id = $3`,
-        ['failed', result.txHash || null, transactionResult.rows[0].id]
-      );
-      await pool.query('COMMIT');
-
-      return res.status(500).json({ ok: false, error: "Withdrawal broadcast failed", details: result.message || "Transaction failed" });
-    }
-
-    await pool.query(
-      `UPDATE transactions SET status = $1, tx_hash = $2 WHERE id = $3`,
-      ['completed', result.txHash, transactionResult.rows[0].id]
+    const result = await processUSDCWithdrawal(
+      userId,
+      walletId,
+      toAddress,
+      withdrawAmount,
+      idempotencyKey
     );
 
     res.json({
       ok: true,
       data: {
-        transactionId: transactionResult.rows[0].id,
-        status: 'completed',
-        tx_hash: result.txHash,
-        message: "Withdrawal completed successfully",
+        transactionId: result.transactionId,
+        status: result.status,
+        txHash: result.txHash,
+        message: result.message,
       },
     });
-  } catch (err) {
-    await pool.query('ROLLBACK');
-    console.error("withdraw error", err);
-    res.status(500).json({ ok: false, error: "Withdrawal failed" });
+  } catch (error) {
+    console.error("withdraw error", error);
+    res.status(500).json({
+      ok: false,
+      error: error.message || "Withdrawal failed"
+    });
   }
 };
 
-// Get pending transfers for a recipient
+// Get withdrawal status
+export const getWithdrawalStatusController = async (req, res) => {
+  const userId = req.user?.id;
+  const { transactionId } = req.params;
+
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: "Not authenticated" });
+  }
+
+  if (!transactionId) {
+    return res.status(400).json({ ok: false, error: "Transaction ID required" });
+  }
+
+  try {
+    const status = await getWithdrawalStatus(transactionId, userId);
+    res.json({ ok: true, data: status });
+  } catch (error) {
+    console.error("getWithdrawalStatus error", error);
+    res.status(404).json({ ok: false, error: error.message });
+  }
+};
 export const getPendingTransfers = async (req, res) => {
   const userId = req.user?.id;
 

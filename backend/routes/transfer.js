@@ -10,5 +10,6 @@ router.post("/initiate", authenticate, transfer.initiateTransfer);
 router.post("/confirm", authenticate, transfer.confirmTransfer);
 router.get("/history", authenticate, transfer.getTransferHistory);
 router.post("/withdraw", authenticate, transfer.withdraw);
+router.get("/withdraw/:transactionId", authenticate, transfer.getWithdrawalStatusController);
 
 export default router;
