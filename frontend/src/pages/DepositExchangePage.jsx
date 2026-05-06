@@ -69,10 +69,10 @@ const DepositExchangePage = ({ currentUser, navigateTo }) => {
         <div className="supported-tokens">
           <h3>Supported Tokens</h3>
           <div className="token-list">
-            <span className="token-chip">ETH</span>
-            <span className="token-chip">USDT</span>
+            <span className="token-chip">SOL</span>
             <span className="token-chip">USDC</span>
-            <span className="token-chip">DAI</span>
+            <span className="token-chip">USDT</span>
+            <span className="token-chip">USDT-SPL</span>
           </div>
         </div>
 

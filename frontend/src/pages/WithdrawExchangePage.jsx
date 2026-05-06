@@ -7,8 +7,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
   const [formData, setFormData] = useState({
     recipientAddress: '',
     amount: '',
-    network: wallet?.chain || 'ethereum',
-    tokenAddress: '' // optional, for ERC-20 tokens
+    tokenAddress: '' // optional, for SPL token mint address
   });
   const [transactionData, setTransactionData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,7 +60,6 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
     setFormData({
       recipientAddress: '',
       amount: '',
-      network: wallet?.chain || 'ethereum',
       tokenAddress: ''
     });
     setTransactionData(null);
@@ -91,7 +89,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
 
         <FormStep
           title="Enter Withdrawal Details"
-          subtitle="Send crypto to any external address"
+          subtitle="Send SOL to any external Solana wallet or exchange address"
           onNext={handleFormSubmit}
           nextLabel="Continue"
           canProceed={formData.recipientAddress && formData.amount}
@@ -104,7 +102,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
               name="recipientAddress"
               value={formData.recipientAddress}
               onChange={handleInputChange}
-              placeholder="0x..."
+              placeholder="Enter Solana wallet address"
               required
             />
           </div>
@@ -125,30 +123,21 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="network">Network</label>
-            <select
-              id="network"
-              name="network"
-              value={formData.network}
-              onChange={handleInputChange}
-            >
-              <option value="ethereum">Ethereum</option>
-              <option value="polygon">Polygon</option>
-              <option value="bsc">BSC</option>
-            </select>
+            <label>Network</label>
+            <div className="info-value">{wallet.chain?.toUpperCase() || 'SOLANA'}</div>
           </div>
 
           <div className="form-group">
-            <label htmlFor="tokenAddress">Token Contract (Optional)</label>
+            <label htmlFor="tokenAddress">Token Mint Address (Optional)</label>
             <input
               type="text"
               id="tokenAddress"
               name="tokenAddress"
               value={formData.tokenAddress}
               onChange={handleInputChange}
-              placeholder="Leave empty for ETH"
+              placeholder="Leave empty to send SOL"
             />
-            <small className="form-hint">Leave empty to send native token (ETH)</small>
+            <small className="form-hint">Leave empty to send native SOL</small>
           </div>
 
           <div className="withdrawal-warning">
@@ -172,8 +161,8 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
         details={[
           { label: 'Recipient', value: `${formData.recipientAddress.substring(0, 12)}...${formData.recipientAddress.substring(-8)}` },
           { label: 'Amount', value: formData.amount },
-          { label: 'Network', value: formData.network.toUpperCase() },
-          { label: 'Token', value: formData.tokenAddress ? 'ERC-20 Token' : 'ETH' }
+          { label: 'Network', value: wallet.chain?.toUpperCase() || 'SOLANA' },
+          { label: 'Token', value: formData.tokenAddress ? 'SPL Token' : 'SOL' }
         ]}
         onConfirm={handleConfirm}
         onCancel={() => setCurrentStep('form')}
@@ -200,7 +189,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
         message="Your crypto has been sent successfully"
         details={[
           { label: 'Amount', value: formData.amount },
-          { label: 'Network', value: formData.network.toUpperCase() },
+          { label: 'Network', value: wallet.chain?.toUpperCase() || 'SOLANA' },
           { label: 'Status', value: 'Completed' }
         ]}
         transactionId={transactionData?.txHash}

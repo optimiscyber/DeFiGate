@@ -188,6 +188,14 @@ export const createEmbeddedWallet = async (req, res) => {
 };
 
 // POST /wallet/send — sign and broadcast a transaction via Privy
+async function resolvePrivyWalletId(walletId) {
+  const result = await pool.query(
+    `SELECT provider_wallet_id FROM wallets WHERE id = $1 OR provider_wallet_id = $1 LIMIT 1`,
+    [walletId]
+  );
+  return result.rows[0]?.provider_wallet_id || null;
+}
+
 export const sendTxToAddress = async (req, res) => {
   const { walletId, toAddress, tokenAddress, amount, chain } = req.body;
 
@@ -203,8 +211,22 @@ export const sendTxToAddress = async (req, res) => {
       .json({ ok: false, error: "Only Solana transactions are supported" });
   }
 
+  if (tokenAddress) {
+    return res.status(400).json({
+      ok: false,
+      error: "SPL token transfers are not supported yet. Leave tokenAddress empty to send SOL.",
+    });
+  }
+
   try {
-    // Build a Solana transaction request for Privy
+    const providerWalletId = await resolvePrivyWalletId(walletId);
+    if (!providerWalletId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid wallet identifier for transaction" });
+    }
+
+    // Build a Solana native SOL transaction request for Privy
     const caip2 = chainToCaip2(chain);
     const txBody = {
       chain_type: "solana",
@@ -218,18 +240,8 @@ export const sendTxToAddress = async (req, res) => {
       },
     };
 
-    // If a token address is provided, build an ERC-20 transfer instead
-    if (tokenAddress) {
-      const transferData = encodeErc20Transfer(toAddress, amount);
-      txBody.params.transaction = {
-        to: tokenAddress,
-        data: transferData,
-        value: 0,
-      };
-    }
-
     const r = await axios.post(
-      `${PRIVY_BASE}/v1/wallets/${walletId}/rpc`,
+      `${PRIVY_BASE}/v1/wallets/${providerWalletId}/rpc`,
       txBody,
       { headers: privyHeaders() }
     );

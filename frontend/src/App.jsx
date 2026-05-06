@@ -120,7 +120,7 @@ function App() {
   };
 
   // Wallet functions
-  const createWallet = async (chain = "ethereum") => {
+  const createWallet = async (chain = "solana") => {
     if (!currentUser) {
       toast("Please sign in first", "error");
       setAuthModalOpen(true);
@@ -259,7 +259,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletId: currentUser.wallet.id,
+          walletId: currentUser.wallet.provider_wallet_id || currentUser.wallet.id,
           toAddress,
           tokenAddress: tokenAddress || undefined,
           amount: parseFloat(amount),
