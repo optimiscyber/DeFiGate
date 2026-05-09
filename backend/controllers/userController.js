@@ -39,9 +39,9 @@ export const signup = async (req, res) => {
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, name, wallet_address, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain)
-       VALUES ($1, $2, $3, $4, $5, $6, false, $7, 'pending', $8)
-       RETURNING id, email, name, wallet_address, phone, company, is_verified, kyc_status, preferred_chain`,
+      `INSERT INTO users (email, password_hash, name, wallet_address, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain, role)
+       VALUES ($1, $2, $3, $4, $5, $6, false, $7, 'pending', $8, 'user')
+       RETURNING id, email, name, wallet_address, phone, company, is_verified, kyc_status, preferred_chain, role`,
       [normalizedEmail, hash, name || null, walletAddress || null, phone || null, company || null, verificationToken, preferredChain]
     );
 
@@ -85,6 +85,7 @@ export const signup = async (req, res) => {
         is_verified: user.is_verified,
         kyc_status: user.kyc_status,
         available_balance: 0.0,
+        role: user.role || 'user',
         wallet,
       },
       token,
@@ -114,7 +115,7 @@ export const signin = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT id, email, name, wallet_address, phone, company, password_hash, is_verified, kyc_status, preferred_chain
+      `SELECT id, email, name, wallet_address, phone, company, password_hash, is_verified, kyc_status, preferred_chain, role
        FROM users WHERE email = $1`,
       [normalizedEmail]
     );
@@ -153,6 +154,7 @@ export const signin = async (req, res) => {
         available_balance: available_balance,
         is_verified: user.is_verified,
         kyc_status: user.kyc_status,
+        role: user.role || 'user',
         wallet,
       },
       token,
@@ -395,7 +397,7 @@ export const getMe = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.is_verified, b.available_balance
+      `SELECT u.id, u.email, u.is_verified, u.role, b.available_balance
        FROM users u
        LEFT JOIN balances b ON u.id = b.user_id
        WHERE u.id = $1`,

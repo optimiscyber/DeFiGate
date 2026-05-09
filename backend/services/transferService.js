@@ -2,6 +2,7 @@ import { sequelize } from "../models/index.js";
 import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
 import LedgerEntry from "../models/LedgerEntry.js";
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_ASSET = "USDC";
 const AMOUNT_REGEX = /^\d+(?:\.\d{1,6})?$/;
@@ -109,6 +110,19 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
 
     transactionRecord.status = "completed";
     await transactionRecord.save();
+
+    // Log audit event
+    await logAuditEvent(AUDIT_ACTIONS.TRANSFER_CONFIRMED, {
+      user_id: senderId,
+      transaction_id: transactionRecord.id,
+      amount: amountString,
+      asset: asset,
+      metadata: {
+        receiver_id: receiverId,
+        reference: reference
+      }
+    });
+
     return transactionRecord;
   } catch (error) {
     transactionRecord.status = "failed";

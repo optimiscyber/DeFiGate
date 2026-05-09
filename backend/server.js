@@ -18,6 +18,7 @@ import walletRoutes from "./routes/wallet.js";
 import userRoutes from "./routes/user.js";
 import transferRoutes from "./routes/transfer.js";
 import testRoutes from "./routes/test.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/transfer", transferRoutes);
 app.use("/api/test", testRoutes);
+app.use("/api/admin", adminRoutes);
 
 // ======================
 // HEALTH CHECK

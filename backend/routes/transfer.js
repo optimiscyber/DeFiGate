@@ -5,6 +5,7 @@ import * as transfer from "../controllers/transferController.js";
 const router = express.Router();
 
 router.post("/", authenticate, transfer.transfer);
+router.post("/send", authenticate, transfer.transfer);
 router.post("/lookup", authenticate, transfer.lookupRecipient);
 router.post("/initiate", authenticate, transfer.initiateTransfer);
 router.post("/confirm", authenticate, transfer.confirmTransfer);

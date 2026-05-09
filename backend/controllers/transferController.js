@@ -9,6 +9,7 @@ import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import { processUSDCWithdrawal, getWithdrawalStatus } from "../services/withdrawalService.js";
+import { logAuditEvent, AUDIT_ACTIONS } from '../services/auditService.js';
 dotenv.config();
 
 const inMemoryTransfers = new Map();
@@ -115,6 +116,20 @@ export const initiateTransfer = async (req, res) => {
 
     // Store PIN temporarily (should use Redis in production)
     inMemoryPINs.set(`${senderId}:${transfer.id}`, pin);
+
+    // Log audit event
+    await logAuditEvent(AUDIT_ACTIONS.TRANSFER_INITIATED, {
+      user_id: senderId,
+      amount: transfer.amount,
+      asset: transfer.token_symbol,
+      metadata: {
+        recipient_id: recipientId,
+        transfer_id: transfer.id,
+        chain: transfer.chain
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
 
     res.json({
       ok: true,

@@ -5,6 +5,7 @@ import Transaction from "./Transaction.js";
 import Transfer from "./Transfer.js";
 import Wallet from "./Wallet.js";
 import LedgerEntry from "./LedgerEntry.js";
+import AuditLog from "./AuditLog.js";
 
 // ========== ASSOCIATIONS ==========
 
@@ -52,4 +53,4 @@ Transfer.belongsTo(User, {
   as: "receiver" 
 });
 
-export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry };
+export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry, AuditLog };

@@ -37,6 +37,14 @@ const Wallet = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    last_scanned_signature: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    last_scanned_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "wallets",

@@ -10,6 +10,7 @@ import {
 import axios from "axios";
 import pool from "../db.js";
 import dotenv from "dotenv";
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 dotenv.config();
 
@@ -306,6 +307,19 @@ export async function processUSDCWithdrawal(userId, walletId, recipientAddress, 
          WHERE id = $2`,
         [txHash, transactionId]
       );
+
+      // Log audit event
+      await logAuditEvent(AUDIT_ACTIONS.WITHDRAWAL_BROADCASTED, {
+        user_id: userId,
+        transaction_id: transactionId,
+        tx_hash: txHash,
+        amount: amount,
+        asset: 'USDC',
+        metadata: {
+          recipient_address: recipientAddress,
+          wallet_id: walletId
+        }
+      });
 
       // Step 7: Confirm transaction asynchronously
       confirmTransaction(txHash).then(async (confirmation) => {

@@ -1,5 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Transaction, LedgerEntry, Wallet } from '../models/index.js';
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
@@ -87,7 +88,7 @@ async function ensureSystemAccount(transaction) {
   return systemAccount;
 }
 
-async function processDeposit(wallet, signature) {
+export async function processDeposit(wallet, signature) {
   const existing = await Transaction.findOne({
     where: { tx_hash: signature, type: 'deposit', asset: 'USDC' },
   });
@@ -140,6 +141,21 @@ async function processDeposit(wallet, signature) {
   });
 
   console.log(`Deposit detected ${amountString} USDC for wallet ${wallet.address}`);
+  
+  // Log audit event
+  await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_DETECTED, {
+    user_id: wallet.user_id,
+    wallet_id: wallet.id,
+    transaction_id: depositTransaction.id,
+    tx_hash: signature,
+    amount: amountString,
+    asset: 'USDC',
+    metadata: {
+      wallet_address: wallet.address,
+      amount_base_units: amountBaseUnits.toString()
+    }
+  });
+  
   return true;
 }
 
@@ -147,26 +163,59 @@ export async function checkDeposits() {
   try {
     const wallets = await Wallet.findAll({
       where: { chain: 'solana' },
-      attributes: ['user_id', 'address'],
+      attributes: ['id', 'user_id', 'address', 'last_scanned_signature', 'last_scanned_at'],
     });
 
     for (const wallet of wallets) {
       if (!wallet.address || !isSolanaAddress(wallet.address)) continue;
 
-      const publicKey = new PublicKey(wallet.address);
-      const signatures = await connection.getSignaturesForAddress(publicKey, { limit: 20 });
-
-      for (const sig of signatures) {
-        if (processedSignatures.has(sig.signature)) continue;
-
-        try {
-          const credited = await processDeposit(wallet, sig.signature);
-          if (credited) {
-            processedSignatures.add(sig.signature);
-          }
-        } catch (error) {
-          console.error(`Deposit processing failed for ${sig.signature} (${wallet.address}):`, error?.message || error);
+      try {
+        const publicKey = new PublicKey(wallet.address);
+        
+        // Get signatures starting from the checkpoint
+        // If no checkpoint, getSignaturesForAddress defaults to recent signatures
+        const sigOptions = { limit: 20 };
+        if (wallet.last_scanned_signature) {
+          sigOptions.until = wallet.last_scanned_signature;
         }
+        
+        const signatures = await connection.getSignaturesForAddress(publicKey, sigOptions);
+        if (signatures.length === 0) continue;
+
+        let latestSignature = wallet.last_scanned_signature;
+        let processedCount = 0;
+
+        for (const sig of signatures) {
+          // Skip if this is the checkpoint (until stops BEFORE this sig)
+          if (sig.signature === wallet.last_scanned_signature) continue;
+
+          try {
+            const credited = await processDeposit(wallet, sig.signature);
+            if (credited) {
+              processedSignatures.add(sig.signature);
+              if (!latestSignature) {
+                latestSignature = sig.signature;
+              }
+              processedCount++;
+            }
+          } catch (error) {
+            console.error(`Deposit processing failed for ${sig.signature} (${wallet.address}):`, error?.message || error);
+          }
+        }
+
+        // Update checkpoint after processing batch
+        if (processedCount > 0 || !wallet.last_scanned_signature) {
+          const checkpointSig = signatures[0]?.signature || wallet.last_scanned_signature;
+          if (checkpointSig) {
+            await wallet.update({
+              last_scanned_signature: checkpointSig,
+              last_scanned_at: new Date(),
+            });
+            console.log(`Updated checkpoint for wallet ${wallet.address}: ${checkpointSig}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Deposit check error for wallet ${wallet.address}:`, error?.message || error);
       }
     }
   } catch (error) {
