@@ -21,7 +21,6 @@ import TransferInternalPage from './pages/TransferInternalPage'
 import FinancesPage from './pages/FinancesPage'
 import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
-import AdminDashboard from './pages/AdminDashboard'
 import SignupPage from './pages/SignupPage'
 import TestPanel from './pages/TestPanel'
 import { apiUrl, buildInternalTransferPayload } from './api'
@@ -384,7 +383,6 @@ function App() {
             {currentView === 'finances' && <FinancesPage currentUser={currentUser} navigateTo={navigateTo} />}
             {currentView === 'history' && <HistoryPage currentUser={currentUser} navigateTo={navigateTo} />}
             {currentView === 'settings' && <SettingsPage currentUser={currentUser} navigateTo={navigateTo} toggleAuth={toggleAuth} />}
-            {currentView === 'admin' && currentUser?.role === 'admin' && <AdminDashboard user={currentUser} />}
             {currentView === 'test-panel' && <TestPanel currentUser={currentUser} />}
           </>
         )}

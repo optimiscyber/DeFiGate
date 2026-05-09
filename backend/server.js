@@ -19,6 +19,8 @@ import userRoutes from "./routes/user.js";
 import transferRoutes from "./routes/transfer.js";
 import testRoutes from "./routes/test.js";
 import adminRoutes from "./routes/admin.js";
+import { requestContext } from "./middleware/requestContext.js";
+import { startReconciliationJob } from "./services/reconciliationJob.js";
 
 const app = express();
 
@@ -35,6 +37,7 @@ if (!process.env.DATABASE_URL) {
 // ======================
 app.use(cors());
 app.use(bodyParser.json());
+app.use(requestContext);
 
 // ======================
 // API ROUTES
@@ -83,6 +86,7 @@ const PORT = process.env.PORT || 5000;
     console.log("✅ Models synced");
 
     await import("./services/depositDetector.js");
+    startReconciliationJob({ requestId: `startup-${Date.now()}` });
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 API running on port ${PORT}`);

@@ -53,6 +53,23 @@ const AuditLog = sequelize.define(
       type: DataTypes.JSONB,
       allowNull: true,
     },
+    request_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    before_state: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+    },
+    after_state: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+    },
+    severity: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: 'info',
+    },
     ip_address: {
       type: DataTypes.INET,
       allowNull: true,

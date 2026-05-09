@@ -1,7 +1,8 @@
 // controllers/adminController.js
 import { runReconciliation, autoRepairSafeMismatches } from '../services/reconciliationService.js';
 import { processDeposit } from '../services/depositDetector.js';
-import { Wallet, Transaction } from '../models/index.js';
+import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
+import { Wallet, Transaction, User } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
 import { respondError, respondSuccess } from '../utils/response.js';
 
@@ -151,5 +152,120 @@ export const getAuditLogsEndpoint = async (req, res) => {
   } catch (error) {
     console.error('Audit logs error:', error);
     respondError(res, 500, 'Failed to fetch audit logs', true, error.message);
+  }
+};
+
+export const freezeUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+    if (!userId) {
+      return respondError(res, 400, 'User id is required');
+    }
+
+    await User.update(
+      { is_frozen: true, freeze_reason: reason || 'Under review' },
+      { where: { id: userId } }
+    );
+
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'freeze_user',
+        target_user_id: userId,
+        reason,
+      },
+      severity: 'warning',
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
+    respondSuccess(res, { userId, is_frozen: true });
+  } catch (error) {
+    console.error('Freeze user error:', error);
+    respondError(res, 500, 'Failed to freeze user', true, error.message);
+  }
+};
+
+export const unfreezeUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return respondError(res, 400, 'User id is required');
+    }
+
+    await User.update(
+      { is_frozen: false, freeze_reason: null },
+      { where: { id: userId } }
+    );
+
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'unfreeze_user',
+        target_user_id: userId,
+      },
+      severity: 'info',
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
+    respondSuccess(res, { userId, is_frozen: false });
+  } catch (error) {
+    console.error('Unfreeze user error:', error);
+    respondError(res, 500, 'Failed to unfreeze user', true, error.message);
+  }
+};
+
+export const approveWithdrawalEndpoint = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      return respondError(res, 400, 'Transaction ID is required');
+    }
+
+    const result = await approveWithdrawal(transactionId, req.user.id, {
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+
+    respondSuccess(res, result, 'Withdrawal approved and broadcasted');
+  } catch (error) {
+    console.error('Approve withdrawal error:', error);
+    respondError(res, 500, 'Failed to approve withdrawal', true, error.message);
+  }
+};
+
+export const rejectWithdrawalEndpoint = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const { reason } = req.body;
+    if (!transactionId) {
+      return respondError(res, 400, 'Transaction ID is required');
+    }
+
+    const result = await rejectWithdrawal(transactionId, req.user.id, reason || 'Rejected by support', {
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+
+    respondSuccess(res, result, 'Withdrawal rejected');
+  } catch (error) {
+    console.error('Reject withdrawal error:', error);
+    respondError(res, 500, 'Failed to reject withdrawal', true, error.message);
+  }
+};
+
+export const getPendingWithdrawalsEndpoint = async (req, res) => {
+  try {
+    const result = await getPendingWithdrawals();
+    respondSuccess(res, { withdrawals: result }, 'Pending withdrawals retrieved');
+  } catch (error) {
+    console.error('Get pending withdrawals error:', error);
+    respondError(res, 500, 'Failed to retrieve pending withdrawals', true, error.message);
   }
 };

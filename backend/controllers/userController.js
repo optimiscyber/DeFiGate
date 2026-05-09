@@ -359,12 +359,33 @@ export const getTransactions = async (req, res) => {
   const user = req.user;
 
   try {
-    const transactions = await Transaction.findAll({
-      where: { user_id: user.id },
-      order: [['created_at', 'DESC']],
-    });
+    const result = await pool.query(
+      `SELECT id, type, amount, asset, status, tx_hash, reference, recipient_address, created_at, broadcasted_at, confirmed_at, failed_at, failure_reason, network_fee, 'outgoing'::text AS direction
+       FROM transactions
+       WHERE user_id = $1
+       UNION ALL
+       SELECT 'transfer_' || id AS id,
+              'transfer' AS type,
+              amount,
+              token_symbol AS asset,
+              'completed'::text AS status,
+              NULL AS tx_hash,
+              NULL AS reference,
+              NULL AS recipient_address,
+              created_at,
+              completed_at AS broadcasted_at,
+              NULL AS confirmed_at,
+              NULL AS failed_at,
+              NULL AS failure_reason,
+              NULL AS network_fee,
+              CASE WHEN sender_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
+       FROM transfers
+       WHERE sender_id = $1 OR recipient_id = $1
+       ORDER BY created_at DESC`,
+      [user.id]
+    );
 
-    return respondSuccess(res, { transactions }, "Transactions retrieved");
+    return respondSuccess(res, { transactions: result.rows }, "Transactions retrieved");
   } catch (err) {
     console.error("getTransactions error", err);
     return respondError(res, 500, "Failed to retrieve transactions", true, err.message);
@@ -422,6 +443,7 @@ export const getMe = async (req, res) => {
         user: {
           id: fullUser.id,
           email: fullUser.email,
+          role: fullUser.role || 'user',
           available_balance: Number(fullUser.available_balance || 0),
           is_verified: fullUser.is_verified,
           wallet,

@@ -40,6 +40,10 @@ export async function logAuditEvent(action, data = {}) {
       amount: data.amount,
       asset: data.asset,
       metadata: data.metadata,
+      request_id: data.request_id,
+      before_state: data.before_state,
+      after_state: data.after_state,
+      severity: data.severity || 'info',
       ip_address: data.ip_address,
       user_agent: data.user_agent,
     });

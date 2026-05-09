@@ -7,7 +7,7 @@ import { apiUrl } from './api';
 import TransferPage from './pages/TransferPage';
 import RampPage from './pages/RampPage';
 import WalletPage from './pages/WalletPage';
-import AdminDashboard from './pages/AdminDashboard';
+
 import AuthModal from './components/AuthModal';
 import Toast from './components/Toast';
 
@@ -147,8 +147,6 @@ function App() {
         return <RampPage user={user} onShowToast={showToast} />;
       case 'wallet':
         return <WalletPage user={user} onShowToast={showToast} />;
-      case 'admin':
-        return <AdminDashboard user={user} />;
       default:
         return <Dashboard user={user} onShowToast={showToast} />;
     }

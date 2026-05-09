@@ -2,6 +2,7 @@ import pool from "../db.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import dotenv from "dotenv";
+import { PublicKey } from '@solana/web3.js';
 import sequelize from "../config/database.js";
 import Balance from "../models/Balance.js";
 import Account from "../models/Account.js";

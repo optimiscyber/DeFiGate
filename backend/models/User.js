@@ -60,14 +60,23 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    is_frozen: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    freeze_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
     status: {
       type: DataTypes.STRING,
       defaultValue: 'active',
     },
     role: {
-      type: DataTypes.ENUM('user', 'admin', 'support'),
-      defaultValue: 'user',
+      type: DataTypes.STRING,
       allowNull: false,
+      defaultValue: 'user',
     },
   },
   {
