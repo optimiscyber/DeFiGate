@@ -6,6 +6,7 @@ import { ensureUserWallet } from "./walletController.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Balance from "../models/Balance.js";
+import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
 
 function normalizeEmail(email) {
@@ -54,7 +55,7 @@ export const signup = async (req, res) => {
     );
     user.is_verified = true;
 
-    // Create balance record with zero starting funds
+    // Create balance record with zero starting funds (legacy)
     try {
       await Balance.create({
         user_id: user.id,
@@ -62,6 +63,21 @@ export const signup = async (req, res) => {
       });
     } catch (err) {
       console.error("Balance creation error", err);
+      // Continue, but log
+    }
+
+    // Create Account records for both USDC and SOL
+    try {
+      await Account.findOrCreate({
+        where: { user_id: user.id, asset: 'USDC' },
+        defaults: { available_balance: 0, pending_balance: 0 }
+      });
+      await Account.findOrCreate({
+        where: { user_id: user.id, asset: 'SOL' },
+        defaults: { available_balance: 0, pending_balance: 0 }
+      });
+    } catch (err) {
+      console.error("Account creation error", err);
       // Continue, but log
     }
 

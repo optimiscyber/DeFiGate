@@ -83,6 +83,17 @@ const HistoryPage = ({ currentUser, navigateTo }) => {
     });
   };
 
+  const formatAmount = (amount, asset) => {
+    if (!amount) return '0';
+    const num = parseFloat(amount);
+    if (asset === 'SOL') {
+      // SOL has 9 decimals, show up to 6 decimal places
+      return num.toFixed(6).replace(/\.?0+$/, '');
+    }
+    // USDC has 6 decimals, show up to 2 decimal places
+    return num.toFixed(2).replace(/\.?0+$/, '');
+  };
+
   const formatDescription = (tx) => {
     if (tx.type === 'deposit') return tx.reference || 'Deposit';
     if (tx.type === 'withdrawal') return tx.recipient_address || tx.reference || 'Withdrawal';
@@ -153,7 +164,7 @@ const HistoryPage = ({ currentUser, navigateTo }) => {
                 </div>
               </div>
               <div className="transaction-amount">
-                <div className="amount-primary">{transaction.amount}</div>
+                <div className="amount-primary">{formatAmount(transaction.amount, transaction.asset)}</div>
                 {transaction.asset && <div className="amount-secondary">{transaction.asset}</div>}
               </div>
             </div>
