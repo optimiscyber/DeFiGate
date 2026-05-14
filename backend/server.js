@@ -82,6 +82,15 @@ const PORT = process.env.PORT || 5000;
     await sequelize.authenticate();
     console.log("✅ Database connected");
 
+    if (process.env.AUTO_RUN_MIGRATIONS === 'true') {
+      console.log('🛠️ AUTO_RUN_MIGRATIONS enabled, applying database migrations');
+      const { default: runMigrations } = await import('./scripts/runMigrations.js');
+      const success = await runMigrations();
+      if (!success) {
+        throw new Error('Database migrations failed during startup');
+      }
+    }
+
     await sequelize.sync({ alter: process.env.NODE_ENV === "development" });
     console.log("✅ Models synced");
 

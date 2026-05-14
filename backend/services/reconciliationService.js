@@ -315,7 +315,7 @@ export async function autoRepairSafeMismatches() {
           if (!userAccount) throw new Error('User account not found');
 
           const systemUser = await User.findOne({
-            where: { email: process.env.SYSTEM_USER_EMAIL || 'system@defigate.internal' },
+            where: { email: process.env.SYSTEM_USER_EMAIL || 'system  te.internal' },
             transaction,
           });
 
