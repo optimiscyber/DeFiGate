@@ -8,6 +8,7 @@ import {
   SystemProgram,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
+import { logAuditEvent, AUDIT_ACTIONS } from "../services/auditService.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -61,7 +62,7 @@ async function createPrivyWallet(chainType = "solana") {
 
 async function getWalletByUserIdAndChain(userId, chainType) {
   const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at
+    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary
      FROM wallets WHERE user_id = $1 AND chain = $2 LIMIT 1`,
     [userId, chainType]
   );
@@ -76,9 +77,9 @@ async function saveWallet(userId, privyWallet, chainType = "solana") {
     null;
 
   const insert = await pool.query(
-    `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at`,
+    `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain, last_accessed_at, is_primary)
+     VALUES ($1, $2, $3, $4, $5, NOW(), true)
+     RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary`,
     [userId, "privy", providerWalletId, address, chainType]
   );
 
@@ -107,7 +108,24 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
     try {
       const existing = await getWalletByUserIdAndChain(userId, chainType);
       if (existing) {
-        return { ...existing, status: "connected" };
+        await pool.query(
+          `UPDATE wallets SET last_accessed_at = NOW() WHERE id = $1`,
+          [existing.id]
+        );
+
+        await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
+          user_id: userId,
+          wallet_id: existing.id,
+          asset: chainType,
+          metadata: {
+            provider: existing.provider,
+            provider_wallet_id: existing.provider_wallet_id,
+            wallet_address: existing.address,
+          },
+          request_id: `wallet_access_${Date.now()}`,
+        });
+
+        return { ...existing, status: "connected", last_accessed_at: new Date().toISOString() };
       }
 
       if (!isPrivyEnabled) {
@@ -126,6 +144,21 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
 
       const privyWallet = await createPrivyWallet(chainType);
       const wallet = await saveWallet(userId, privyWallet, chainType);
+
+      await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
+        user_id: userId,
+        wallet_id: wallet.id,
+        asset: chainType,
+        tx_hash: null,
+        metadata: {
+          provider: wallet.provider,
+          provider_wallet_id: wallet.provider_wallet_id,
+          wallet_address: wallet.address,
+          created_at: wallet.created_at,
+        },
+        request_id: `wallet_create_${Date.now()}`,
+      });
+
       return { ...wallet, status: "connected", metadata: privyWallet };
     } catch (err) {
       console.error("DB wallet error, falling back to in-memory", err?.message || err);

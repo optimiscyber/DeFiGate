@@ -21,6 +21,7 @@ import testRoutes from "./routes/test.js";
 import adminRoutes from "./routes/admin.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { startReconciliationJob } from "./services/reconciliationJob.js";
+import { startBalanceSyncJob } from "./services/balanceSyncService.js";
 
 const app = express();
 
@@ -96,6 +97,7 @@ const PORT = process.env.PORT || 5000;
 
     await import("./services/depositDetector.js");
     startReconciliationJob({ requestId: `startup-${Date.now()}` });
+    startBalanceSyncJob({ requestId: `startup-${Date.now()}` });
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 API running on port ${PORT}`);

@@ -45,6 +45,16 @@ const Wallet = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    last_accessed_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    is_primary: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "wallets",

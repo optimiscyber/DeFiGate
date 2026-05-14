@@ -58,7 +58,7 @@ async function getBlockchainUSDCBalance(walletAddress) {
 /**
  * Get app ledger balance for a user (only completed transactions)
  */
-async function getAppLedgerBalance(userId, asset = 'USDC') {
+export async function getAppLedgerBalance(userId, asset = 'USDC') {
   const account = await Account.findOne({
     where: { user_id: userId, asset },
   });

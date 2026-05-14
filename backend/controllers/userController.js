@@ -19,7 +19,7 @@ function generateVerificationToken() {
 
 async function getWalletForUser(userId) {
   const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at
+    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary
      FROM wallets WHERE user_id = $1 LIMIT 1`,
     [userId]
   );
@@ -419,7 +419,17 @@ export const getBalances = async (req, res) => {
       [user.id]
     );
 
-    return respondSuccess(res, { balances: balancesResult.rows }, "Balances retrieved");
+    if (balancesResult.rows.length > 0) {
+      return respondSuccess(res, { balances: balancesResult.rows }, "Balances retrieved");
+    }
+
+    // Return default assets when no balances exist yet
+    return respondSuccess(res, {
+      balances: [
+        { asset: 'USDC', available_balance: 0, pending_balance: 0, updated_at: null },
+        { asset: 'SOL', available_balance: 0, pending_balance: 0, updated_at: null },
+      ],
+    }, "Balances retrieved");
   } catch (err) {
     console.error("getBalances error", err);
     return respondError(res, 500, "Failed to retrieve balances", true, err.message);
