@@ -16,31 +16,32 @@ const AdminDashboard = ({ user }) => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // Load reconciliation data
-      const reconcileResponse = await fetch(apiUrl('/admin/reconcile'), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ autoRepair: false }) // Don't auto-repair on dashboard load
-      });
+      // Load reconciliation data only for admin users
+      if (user?.role === 'admin') {
+        const reconcileResponse = await fetch(apiUrl('/admin/reconcile'), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ autoRepair: false }) // Don't auto-repair on dashboard load
+        });
 
-      if (reconcileResponse.ok) {
-        const reconcileResult = await reconcileResponse.json();
-        setReconciliationData(reconcileResult.data);
-      }
+        if (reconcileResponse.ok) {
+          const reconcileResult = await reconcileResponse.json();
+          setReconciliationData(reconcileResult.data);
+        }
 
-      // Load recent audit logs
-      const logsResponse = await fetch(apiUrl('/admin/audit-logs?limit=50'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        },
-      });
+        const logsResponse = await fetch(apiUrl('/admin/audit-logs?limit=50'), {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          },
+        });
 
-      if (logsResponse.ok) {
-        const logsResult = await logsResponse.json();
-        setAuditLogs(logsResult.data.logs || []);
+        if (logsResponse.ok) {
+          const logsResult = await logsResponse.json();
+          setAuditLogs(logsResult.data.logs || []);
+        }
       }
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
@@ -75,7 +76,7 @@ const AdminDashboard = ({ user }) => {
     }
   };
 
-  if (user?.role !== 'admin') {
+  if (!['admin', 'support'].includes(user?.role)) {
     return (
       <div className="dashboard-container">
         <div className="error-message">
@@ -86,11 +87,18 @@ const AdminDashboard = ({ user }) => {
     );
   }
 
+  const isAdmin = user?.role === 'admin';
+
   return (
     <div className="dashboard-container">
       <div style={{ marginBottom: '24px' }}>
         <h1>Admin Dashboard</h1>
         <p>Monitor system health and manage operations</p>
+        {!isAdmin && (
+          <p style={{ marginTop: '8px', color: 'var(--text-muted)' }}>
+            Limited support access. Reconciliation and audit visibility are reserved for administrators.
+          </p>
+        )}
       </div>
 
       {/* Tab Navigation */}
@@ -103,13 +111,15 @@ const AdminDashboard = ({ user }) => {
         </button>
         <button
           className={`tab-button ${activeTab === 'reconciliation' ? 'active' : ''}`}
-          onClick={() => setActiveTab('reconciliation')}
+          onClick={() => isAdmin && setActiveTab('reconciliation')}
+          disabled={!isAdmin}
         >
           Reconciliation
         </button>
         <button
           className={`tab-button ${activeTab === 'audit' ? 'active' : ''}`}
-          onClick={() => setActiveTab('audit')}
+          onClick={() => isAdmin && setActiveTab('audit')}
+          disabled={!isAdmin}
         >
           Audit Logs
         </button>
@@ -160,47 +170,52 @@ const AdminDashboard = ({ user }) => {
       {activeTab === 'reconciliation' && (
         <div className="reconciliation-details">
           <h2>Reconciliation Results</h2>
-
-          {reconciliationData?.reconciliation?.results?.map((result, index) => (
-            <div key={index} className={`result-card ${result.status}`}>
-              <div className="result-header">
-                <span className="wallet-address">{result.address}</span>
-                <span className={`status-badge ${result.status}`}>
-                  {result.status}
-                </span>
-              </div>
-
-              {result.status === 'mismatch' && (
-                <div className="mismatch-details">
-                  <div className="balance-comparison">
-                    <div>
-                      <label>Blockchain:</label>
-                      <span>{result.blockchain_balance?.toFixed(2)} USDC</span>
-                    </div>
-                    <div>
-                      <label>App:</label>
-                      <span>{result.app_balance?.toFixed(2)} USDC</span>
-                    </div>
-                    <div>
-                      <label>Difference:</label>
-                      <span className={result.difference > 0 ? 'positive' : 'negative'}>
-                        {result.difference > 0 ? '+' : ''}{result.difference?.toFixed(2)} USDC
-                      </span>
-                    </div>
+          {!isAdmin ? (
+            <p>Reconciliation controls are restricted to administrators.</p>
+          ) : (
+            <>
+              {reconciliationData?.reconciliation?.results?.map((result, index) => (
+                <div key={index} className={`result-card ${result.status}`}>
+                  <div className="result-header">
+                    <span className="wallet-address">{result.address}</span>
+                    <span className={`status-badge ${result.status}`}>
+                      {result.status}
+                    </span>
                   </div>
-                </div>
-              )}
 
-              {result.error && (
-                <div className="error-details">
-                  <p>Error: {result.error}</p>
-                </div>
-              )}
-            </div>
-          ))}
+                  {result.status === 'mismatch' && (
+                    <div className="mismatch-details">
+                      <div className="balance-comparison">
+                        <div>
+                          <label>Blockchain:</label>
+                          <span>{result.blockchain_balance?.toFixed(2)} USDC</span>
+                        </div>
+                        <div>
+                          <label>App:</label>
+                          <span>{result.app_balance?.toFixed(2)} USDC</span>
+                        </div>
+                        <div>
+                          <label>Difference:</label>
+                          <span className={result.difference > 0 ? 'positive' : 'negative'}>
+                            {result.difference > 0 ? '+' : ''}{result.difference?.toFixed(2)} USDC
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-          {(!reconciliationData?.reconciliation?.results || reconciliationData.reconciliation.results.length === 0) && (
-            <p>No reconciliation data available. Run reconciliation first.</p>
+                  {result.error && (
+                    <div className="error-details">
+                      <p>Error: {result.error}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {(!reconciliationData?.reconciliation?.results || reconciliationData.reconciliation.results.length === 0) && (
+                <p>No reconciliation data available. Run reconciliation first.</p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -210,31 +225,35 @@ const AdminDashboard = ({ user }) => {
         <div className="audit-logs">
           <h2>Audit Logs</h2>
 
-          <div className="logs-table">
-            <div className="table-header">
-              <div>Action</div>
-              <div>User</div>
-              <div>Amount</div>
-              <div>Timestamp</div>
-            </div>
-
-            {auditLogs.map((log, index) => (
-              <div key={index} className="table-row">
-                <div className="action">{log.action}</div>
-                <div className="user">{log.user_id || 'System'}</div>
-                <div className="amount">
-                  {log.amount && log.asset ? `${log.amount} ${log.asset}` : '-'}
-                </div>
-                <div className="timestamp">
-                  {new Date(log.created_at).toLocaleString()}
-                </div>
+          {!isAdmin ? (
+            <p>Audit log viewing is restricted to administrators.</p>
+          ) : (
+            <div className="logs-table">
+              <div className="table-header">
+                <div>Action</div>
+                <div>User</div>
+                <div>Amount</div>
+                <div>Timestamp</div>
               </div>
-            ))}
 
-            {auditLogs.length === 0 && (
-              <p>No audit logs available.</p>
-            )}
-          </div>
+              {auditLogs.map((log, index) => (
+                <div key={index} className="table-row">
+                  <div className="action">{log.action}</div>
+                  <div className="user">{log.user_id || 'System'}</div>
+                  <div className="amount">
+                    {log.amount && log.asset ? `${log.amount} ${log.asset}` : '-'}
+                  </div>
+                  <div className="timestamp">
+                    {new Date(log.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+
+              {auditLogs.length === 0 && (
+                <p>No audit logs available.</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

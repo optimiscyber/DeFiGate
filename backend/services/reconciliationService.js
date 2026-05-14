@@ -8,6 +8,25 @@ const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.s
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
+// SOL Constants
+const SOL_DECIMALS = 9;
+const LAMPORTS_PER_SOL = 1_000_000_000;
+
+/**
+ * Get native SOL balance from Solana blockchain for a wallet address
+ */
+async function getBlockchainSolBalance(walletAddress) {
+  try {
+    const publicKey = new PublicKey(walletAddress);
+    const balanceLamports = await connection.getBalance(publicKey, 'confirmed');
+    const balanceSol = balanceLamports / LAMPORTS_PER_SOL;
+    return balanceSol;
+  } catch (error) {
+    console.error(`Failed to get SOL balance for ${walletAddress}:`, error);
+    return null;
+  }
+}
+
 /**
  * Get USDC balance from Solana blockchain for a wallet address
  */
@@ -64,14 +83,72 @@ async function getAppLedgerBalance(userId, asset = 'USDC') {
 }
 
 /**
- * Reconcile a single wallet
+ * Reconcile a single wallet for a specific asset
  */
-async function reconcileWallet(wallet) {
+async function reconcileWalletAsset(wallet, asset) {
+  if (asset === 'SOL') {
+    const blockchainBalance = await getBlockchainSolBalance(wallet.address);
+    if (blockchainBalance === null) {
+      return {
+        wallet_id: wallet.id,
+        address: wallet.address,
+        asset: 'SOL',
+        status: 'error',
+        error: 'Failed to fetch SOL balance'
+      };
+    }
+
+    const appBalance = await getAppLedgerBalance(wallet.user_id, 'SOL');
+    const difference = blockchainBalance - appBalance;
+
+    const result = {
+      wallet_id: wallet.id,
+      address: wallet.address,
+      asset: 'SOL',
+      blockchain_balance: blockchainBalance,
+      app_balance: appBalance,
+      difference: difference,
+      status: Math.abs(difference) < 0.00001 ? 'matched' : 'mismatch'
+    };
+
+    // Log reconciliation result
+    await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_RUN, {
+      user_id: wallet.user_id,
+      wallet_id: wallet.id,
+      asset: 'SOL',
+      metadata: {
+        blockchain_balance: blockchainBalance,
+        app_balance: appBalance,
+        difference: difference,
+        status: result.status
+      }
+    });
+
+    // Log mismatch if found
+    if (result.status === 'mismatch') {
+      await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_MISMATCH, {
+        user_id: wallet.user_id,
+        wallet_id: wallet.id,
+        amount: difference.toString(),
+        asset: 'SOL',
+        metadata: {
+          blockchain_balance: blockchainBalance,
+          app_balance: appBalance,
+          difference: difference
+        }
+      });
+    }
+
+    return result;
+  }
+
+  // USDC reconciliation (original logic)
   const blockchainBalance = await getBlockchainUSDCBalance(wallet.address);
   if (blockchainBalance === null) {
     return {
       wallet_id: wallet.id,
       address: wallet.address,
+      asset: 'USDC',
       status: 'error',
       error: 'Failed to fetch blockchain balance'
     };
@@ -85,6 +162,7 @@ async function reconcileWallet(wallet) {
   const result = {
     wallet_id: wallet.id,
     address: wallet.address,
+    asset: 'USDC',
     blockchain_balance: blockchainBalanceFloat,
     app_balance: appBalance,
     difference: difference,
@@ -95,6 +173,7 @@ async function reconcileWallet(wallet) {
   await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_RUN, {
     user_id: wallet.user_id,
     wallet_id: wallet.id,
+    asset: 'USDC',
     metadata: {
       blockchain_balance: blockchainBalanceFloat,
       app_balance: appBalance,
@@ -122,6 +201,24 @@ async function reconcileWallet(wallet) {
 }
 
 /**
+ * Reconcile a single wallet for both SOL and USDC
+ */
+async function reconcileWallet(wallet) {
+  try {
+    const usdcResult = await reconcileWalletAsset(wallet, 'USDC');
+    const solResult = await reconcileWalletAsset(wallet, 'SOL');
+    return [usdcResult, solResult];
+  } catch (error) {
+    return [{
+      wallet_id: wallet.id,
+      address: wallet.address,
+      status: 'error',
+      error: error.message
+    }];
+  }
+}
+
+/**
  * Run reconciliation for all wallets
  */
 export async function runReconciliation(options = {}) {
@@ -140,8 +237,9 @@ export async function runReconciliation(options = {}) {
   for (const wallet of wallets) {
     if (!wallet.address) continue;
     try {
-      const result = await reconcileWallet(wallet);
-      results.push(result);
+      const walletResults = await reconcileWallet(wallet);
+      // reconcileWallet returns an array of results (USDC and SOL)
+      results.push(...walletResults);
     } catch (error) {
       results.push({
         wallet_id: wallet.id,
@@ -173,12 +271,14 @@ export async function autoRepairSafeMismatches() {
   for (const result of reconciliation.results) {
     // Only repair when blockchain has MORE than app (missed deposits)
     // Never repair when blockchain has LESS (could be fraud, failed withdrawals, etc.)
-    if (result.status === 'mismatch' && result.difference > 0.01 && result.difference < 1000) {
+    if (result.status === 'mismatch' && result.difference > 0.00001 && result.difference < 1000000) {
       // Additional safety: don't repair extremely large amounts without manual review
       try {
         // Find the wallet and user
         const wallet = await Wallet.findByPk(result.wallet_id);
         if (!wallet) continue;
+
+        const asset = result.asset || 'USDC';
 
         // Double-check: ensure this wallet actually received deposits recently
         // This prevents repairing wallets that just happen to have balances
@@ -186,7 +286,7 @@ export async function autoRepairSafeMismatches() {
           where: {
             user_id: wallet.user_id,
             type: 'deposit',
-            asset: 'USDC',
+            asset: asset,
             status: 'completed',
             created_at: {
               [Op.gte]: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
@@ -199,7 +299,7 @@ export async function autoRepairSafeMismatches() {
           repairs.push({
             wallet_id: result.wallet_id,
             skipped: true,
-            reason: 'No recent deposits found - manual review required'
+            reason: `No recent ${asset} deposits found - manual review required`
           });
           continue;
         }
@@ -207,7 +307,7 @@ export async function autoRepairSafeMismatches() {
         // Create a repair transaction
         await sequelize.transaction(async (transaction) => {
           const userAccount = await Account.findOne({
-            where: { user_id: wallet.user_id, asset: 'USDC' },
+            where: { user_id: wallet.user_id, asset },
             transaction,
             lock: transaction.LOCK.UPDATE,
           });
@@ -222,7 +322,7 @@ export async function autoRepairSafeMismatches() {
           if (!systemUser) throw new Error('System user not found');
 
           const systemAccount = await Account.findOne({
-            where: { user_id: systemUser.id, asset: 'USDC' },
+            where: { user_id: systemUser.id, asset },
             transaction,
           });
 
@@ -232,9 +332,9 @@ export async function autoRepairSafeMismatches() {
             user_id: wallet.user_id,
             type: 'deposit',
             amount: result.difference.toString(),
-            asset: 'USDC',
+            asset: asset,
             status: 'completed',
-            tx_hash: `repair_${Date.now()}_${wallet.id}`,
+            tx_hash: `repair_${Date.now()}_${wallet.id}_${asset}`,
           }, { transaction });
 
           await sequelize.models.LedgerEntry.create({
@@ -251,7 +351,7 @@ export async function autoRepairSafeMismatches() {
             wallet_id: wallet.id,
             transaction_id: repairTransaction.id,
             amount: result.difference.toString(),
-            asset: 'USDC',
+            asset: asset,
             metadata: {
               type: 'auto_repair_reconciliation',
               original_mismatch: result.difference,
@@ -259,6 +359,26 @@ export async function autoRepairSafeMismatches() {
               app_balance: result.app_balance
             }
           });
+
+          repairs.push({
+            wallet_id: result.wallet_id,
+            repaired: true,
+            amount: result.difference.toString(),
+            asset: asset
+          });
+        });
+      } catch (error) {
+        repairs.push({
+          wallet_id: result.wallet_id,
+          skipped: true,
+          reason: error.message
+        });
+      }
+    }
+  }
+
+  return repairs;
+}
 
           repairs.push({
             wallet_id: result.wallet_id,

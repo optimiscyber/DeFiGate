@@ -155,6 +155,74 @@ export const getAuditLogsEndpoint = async (req, res) => {
   }
 };
 
+export const getUsers = async (req, res) => {
+  try {
+    const { role, limit = 100, offset = 0 } = req.query;
+    const where = {};
+
+    if (role) {
+      where.role = role;
+    }
+
+    const users = await User.findAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10),
+      attributes: ['id', 'email', 'name', 'role', 'is_frozen', 'freeze_reason', 'created_at'],
+    });
+
+    respondSuccess(res, { users });
+  } catch (error) {
+    console.error('Get users error:', error);
+    respondError(res, 500, 'Failed to fetch users', true, error.message);
+  }
+};
+
+export const updateUserRole = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+    const validRoles = ['user', 'support', 'admin'];
+
+    if (!userId) {
+      return respondError(res, 400, 'User id is required');
+    }
+    if (!role || !validRoles.includes(role)) {
+      return respondError(res, 400, 'Invalid role');
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return respondError(res, 404, 'User not found');
+    }
+
+    const beforeState = user.toJSON();
+    await user.update({ role });
+
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'update_user_role',
+        target_user_id: userId,
+        previous_role: beforeState.role,
+        new_role: role,
+      },
+      before_state: beforeState,
+      after_state: user.toJSON(),
+      severity: 'warning',
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+
+    respondSuccess(res, { user: user.toJSON() });
+  } catch (error) {
+    console.error('Update user role error:', error);
+    respondError(res, 500, 'Failed to update user role', true, error.message);
+  }
+};
+
 export const freezeUser = async (req, res) => {
   try {
     const { userId } = req.params;

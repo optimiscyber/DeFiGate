@@ -15,6 +15,8 @@ router.post('/deposits/reprocess', requireRole('admin'), admin.reprocessDeposit)
 router.get('/audit-logs', requireRole('admin'), admin.getAuditLogsEndpoint);
 
 // Support-safe operational controls
+router.get('/users', requireSupport, admin.getUsers);
+router.post('/users/:userId/role', requireRole('admin'), admin.updateUserRole);
 router.post('/users/:userId/freeze', requireSupport, admin.freezeUser);
 router.post('/users/:userId/unfreeze', requireSupport, admin.unfreezeUser);
 router.post('/withdrawals/:transactionId/approve', requireSupport, admin.approveWithdrawalEndpoint);
