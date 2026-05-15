@@ -203,7 +203,7 @@ async function reconcileWalletAsset(wallet, asset) {
 /**
  * Reconcile a single wallet for both SOL and USDC
  */
-async function reconcileWallet(wallet) {
+async function reconcileWalletRecord(wallet) {
   try {
     const usdcResult = await reconcileWalletAsset(wallet, 'USDC');
     const solResult = await reconcileWalletAsset(wallet, 'SOL');
@@ -237,8 +237,8 @@ export async function runReconciliation(options = {}) {
   for (const wallet of wallets) {
     if (!wallet.address) continue;
     try {
-      const walletResults = await reconcileWallet(wallet);
-      // reconcileWallet returns an array of results (USDC and SOL)
+      const walletResults = await reconcileWalletRecord(wallet);
+      // reconcileWalletRecord returns an array of results (USDC and SOL)
       results.push(...walletResults);
     } catch (error) {
       results.push({
@@ -257,6 +257,23 @@ export async function runReconciliation(options = {}) {
     errors: results.filter(r => r.status === 'error').length,
     results
   };
+}
+
+export async function reconcileWallet(walletId) {
+  const wallet = await Wallet.findByPk(walletId);
+  if (!wallet || !wallet.address) {
+    return {
+      wallet_id: walletId,
+      status: 'error',
+      error: 'Wallet not found or missing address',
+    };
+  }
+  const results = await reconcileWalletRecord(wallet);
+  return results;
+}
+
+export async function reconcileAllWallets() {
+  return runReconciliation();
 }
 
 /**
@@ -315,7 +332,7 @@ export async function autoRepairSafeMismatches() {
           if (!userAccount) throw new Error('User account not found');
 
           const systemUser = await User.findOne({
-            where: { email: process.env.SYSTEM_USER_EMAIL || 'system  te.internal' },
+            where: { email: process.env.SYSTEM_USER_EMAIL || SYSTEM_USER_EMAIL },
             transaction,
           });
 

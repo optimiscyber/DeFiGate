@@ -45,6 +45,44 @@ export const reconcile = async (req, res) => {
   }
 };
 
+export const reconcileWallet = async (req, res) => {
+  try {
+    const walletId = req.params.walletId;
+    const { autoRepair = false } = req.body;
+
+    if (!walletId) {
+      return respondError(res, 400, 'walletId is required');
+    }
+
+    const result = await runReconciliation({ walletId });
+
+    let repairResult = null;
+    if (autoRepair && result.mismatches > 0) {
+      repairResult = await autoRepairSafeMismatches();
+    }
+
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'reconciliation_run_wallet',
+        wallet_id: walletId,
+        auto_repair: autoRepair,
+        results: result,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+
+    respondSuccess(res, {
+      reconciliation: result,
+      repairs: repairResult,
+    });
+  } catch (error) {
+    console.error('Wallet reconciliation error:', error);
+    respondError(res, 500, 'Reconciliation failed', true, error.message);
+  }
+};
+
 /**
  * POST /admin/deposits/reprocess
  * Manually reprocess a deposit transaction

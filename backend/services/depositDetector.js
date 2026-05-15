@@ -14,7 +14,6 @@ const SOL_DECIMALS = 9;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-const processedSignatures = new Set();
 
 function parseTokenAmount(tokenBalance) {
   if (!tokenBalance || !tokenBalance.uiTokenAmount) return 0n;
@@ -52,41 +51,23 @@ function isSolanaAddress(address) {
  * @param {string} walletAddress - The wallet address to monitor
  * @returns {BigInt} Amount in lamports (positive if deposit detected)
  */
-function getSolDepositAmountFromMeta(meta, walletAddress) {
-  if (!meta || !meta.preBalances || !meta.postBalances) return 0n;
-  if (!meta.postTokenBalances) return 0n; // No token account info means we can't identify the wallet accurately
-
-  // Find the account index corresponding to the wallet address
-  // by looking at token balance account owners (SPL token accounts are owned by the wallet)
-  let walletAccountIndex = null;
-  
-  // Try to identify wallet account from token account ownership
-  for (const tokenBal of meta.postTokenBalances || []) {
-    if (tokenBal.owner === walletAddress && typeof tokenBal.accountIndex === 'number') {
-      // This is a token account owned by the wallet. The wallet is typically the signer (index 0 or early).
-      // We'll look for the native SOL account by checking preBalances/postBalances
-      break;
-    }
+function getSolDepositAmountFromMeta(tx, walletAddress) {
+  if (!tx || !tx.meta || !tx.meta.preBalances || !tx.meta.postBalances || !tx.transaction?.message?.accountKeys) {
+    return 0n;
   }
 
-  // For native SOL, we need to identify the wallet's account index in the transaction accounts.
-  // Unfortunately, the transaction metadata doesn't directly give us account addresses.
-  // We rely on a heuristic: the wallet is typically the first signer (index 0) in user-initiated transactions.
-  // This is safe because we're only processing transactions for wallets we own.
-  
-  // Check the first few accounts (typically signers) for SOL balance changes
-  for (let i = 0; i < Math.min(5, meta.preBalances.length); i++) {
-    const preLamports = meta.preBalances[i] || 0;
-    const postLamports = meta.postBalances[i] || 0;
-    const delta = postLamports - preLamports;
-    
-    if (delta > 0) {
-      // Positive delta = SOL received
-      return BigInt(delta);
-    }
+  const accountIndex = tx.transaction.message.accountKeys.findIndex(
+    (key) => key.toString() === walletAddress
+  );
+  if (accountIndex < 0) {
+    return 0n;
   }
 
-  return 0n;
+  const preLamports = BigInt(tx.meta.preBalances[accountIndex] || 0);
+  const postLamports = BigInt(tx.meta.postBalances[accountIndex] || 0);
+  const delta = postLamports - preLamports;
+
+  return delta > 0n ? delta : 0n;
 }
 
 function formatSolAmount(lamports) {
@@ -344,6 +325,75 @@ export async function processDeposit(wallet, signature) {
   }
 }
 
+async function withRetry(fn, attempts = 3, delayMs = 3000) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.warn(`Retry ${attempt} failed:`, error?.message || error);
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function scanWalletSignatures(wallet) {
+  const publicKey = new PublicKey(wallet.address);
+  const batchLimit = 100;
+  const checkpoint = wallet.last_scanned_signature;
+  let before = undefined;
+  let newestSignature = wallet.last_scanned_signature;
+  let processedCount = 0;
+  let reachedCheckpoint = false;
+
+  while (!reachedCheckpoint) {
+    const options = { limit: batchLimit };
+    if (before) options.before = before;
+
+    const signatures = await withRetry(() => connection.getSignaturesForAddress(publicKey, options));
+    if (!signatures || signatures.length === 0) break;
+
+    if (!newestSignature) {
+      newestSignature = signatures[0].signature;
+    }
+
+    for (const sig of signatures) {
+      if (sig.signature === checkpoint) {
+        reachedCheckpoint = true;
+        break;
+      }
+
+      try {
+        const credited = await processDeposit(wallet, sig.signature);
+        if (credited) {
+          processedCount += 1;
+        }
+      } catch (error) {
+        console.error(`Deposit processing failed for ${sig.signature} (${wallet.address}):`, error?.message || error);
+      }
+    }
+
+    if (reachedCheckpoint || signatures.length < batchLimit) {
+      break;
+    }
+    before = signatures[signatures.length - 1].signature;
+  }
+
+  if (newestSignature && newestSignature !== wallet.last_scanned_signature) {
+    await wallet.update({
+      last_scanned_signature: newestSignature,
+      last_scanned_at: new Date(),
+    });
+    console.log(`Updated checkpoint for wallet ${wallet.address}: ${newestSignature}`);
+  }
+
+  return processedCount;
+}
+
 export async function checkDeposits() {
   try {
     const wallets = await Wallet.findAll({
@@ -355,50 +405,7 @@ export async function checkDeposits() {
       if (!wallet.address || !isSolanaAddress(wallet.address)) continue;
 
       try {
-        const publicKey = new PublicKey(wallet.address);
-        
-        // Get signatures starting from the checkpoint
-        // If no checkpoint, getSignaturesForAddress defaults to recent signatures
-        const sigOptions = { limit: 20 };
-        if (wallet.last_scanned_signature) {
-          sigOptions.until = wallet.last_scanned_signature;
-        }
-        
-        const signatures = await connection.getSignaturesForAddress(publicKey, sigOptions);
-        if (signatures.length === 0) continue;
-
-        let latestSignature = wallet.last_scanned_signature;
-        let processedCount = 0;
-
-        for (const sig of signatures) {
-          // Skip if this is the checkpoint (until stops BEFORE this sig)
-          if (sig.signature === wallet.last_scanned_signature) continue;
-
-          try {
-            const credited = await processDeposit(wallet, sig.signature);
-            if (credited) {
-              processedSignatures.add(sig.signature);
-              if (!latestSignature) {
-                latestSignature = sig.signature;
-              }
-              processedCount++;
-            }
-          } catch (error) {
-            console.error(`Deposit processing failed for ${sig.signature} (${wallet.address}):`, error?.message || error);
-          }
-        }
-
-        // Update checkpoint after processing batch
-        if (processedCount > 0 || !wallet.last_scanned_signature) {
-          const checkpointSig = signatures[0]?.signature || wallet.last_scanned_signature;
-          if (checkpointSig) {
-            await wallet.update({
-              last_scanned_signature: checkpointSig,
-              last_scanned_at: new Date(),
-            });
-            console.log(`Updated checkpoint for wallet ${wallet.address}: ${checkpointSig}`);
-          }
-        }
+        await scanWalletSignatures(wallet);
       } catch (error) {
         console.error(`Deposit check error for wallet ${wallet.address}:`, error?.message || error);
       }
@@ -408,5 +415,7 @@ export async function checkDeposits() {
   }
 }
 
-setInterval(checkDeposits, POLL_INTERVAL_MS);
-checkDeposits();
+setInterval(() => {
+  checkDeposits().catch((error) => console.error('Deposit detector failed:', error?.message || error));
+}, POLL_INTERVAL_MS);
+checkDeposits().catch((error) => console.error('Initial deposit detector failed:', error?.message || error));

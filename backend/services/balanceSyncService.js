@@ -192,7 +192,12 @@ export async function syncWalletBalances(wallet) {
     request_id: `balance_sync_${Date.now()}`,
   });
 
-  return result;
+  await wallet.update({ last_synced_at: new Date() });
+
+  return {
+    ...result,
+    last_synced_at: wallet.last_synced_at,
+  };
 }
 
 export async function syncAllUserWallets(options = {}) {

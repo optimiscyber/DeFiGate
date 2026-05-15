@@ -375,33 +375,43 @@ export const getTransactions = async (req, res) => {
   const user = req.user;
 
   try {
-    const result = await pool.query(
-      `SELECT id, type, amount, asset, status, tx_hash, reference, recipient_address, created_at, broadcasted_at, confirmed_at, failed_at, failure_reason, network_fee, 'outgoing'::text AS direction
+    // Get transactions from the transactions table
+    const transactionsResult = await pool.query(
+      `SELECT id, type, amount, asset, status, tx_hash, reference, recipient_address, created_at, broadcasted_at, confirmed_at, failed_at, failure_reason, network_fee, 'transaction'::text AS direction
        FROM transactions
        WHERE user_id = $1
-       UNION ALL
-       SELECT 'transfer_' || id AS id,
+       ORDER BY created_at DESC`,
+      [user.id]
+    );
+
+    // Get transfers from the transfers table
+    const transfersResult = await pool.query(
+      `SELECT 'transfer_' || id AS id,
               'transfer' AS type,
               amount,
-              token_symbol AS asset,
+              'USDC' AS asset,
               'completed'::text AS status,
               NULL AS tx_hash,
               NULL AS reference,
               NULL AS recipient_address,
               created_at,
-              completed_at AS broadcasted_at,
+              created_at AS broadcasted_at,
               NULL AS confirmed_at,
               NULL AS failed_at,
               NULL AS failure_reason,
               NULL AS network_fee,
               CASE WHEN sender_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
        FROM transfers
-       WHERE sender_id = $1 OR recipient_id = $1
+       WHERE sender_id = $1 OR receiver_id = $1
        ORDER BY created_at DESC`,
       [user.id]
     );
 
-    return respondSuccess(res, { transactions: result.rows }, "Transactions retrieved");
+    // Combine and sort all transactions
+    const allTransactions = [...transactionsResult.rows, ...transfersResult.rows]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return respondSuccess(res, { transactions: allTransactions }, "Transactions retrieved");
   } catch (err) {
     console.error("getTransactions error", err);
     return respondError(res, 500, "Failed to retrieve transactions", true, err.message);

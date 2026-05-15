@@ -50,10 +50,14 @@ const Wallet = sequelize.define(
       allowNull: false,
       defaultValue: DataTypes.NOW,
     },
+    last_synced_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     is_primary: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
-      defaultValue: false,
+      defaultValue: true,
     },
   },
   {

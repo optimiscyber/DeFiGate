@@ -11,6 +11,7 @@ router.use(authenticate);
 
 // Admin-only routes
 router.post('/reconcile', requireRole('admin'), admin.reconcile);
+router.post('/reconcile/:walletId', requireRole('admin'), admin.reconcileWallet);
 router.post('/deposits/reprocess', requireRole('admin'), admin.reprocessDeposit);
 router.get('/audit-logs', requireRole('admin'), admin.getAuditLogsEndpoint);
 

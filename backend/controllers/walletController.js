@@ -9,6 +9,8 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { logAuditEvent, AUDIT_ACTIONS } from "../services/auditService.js";
+import { getAppLedgerBalance } from "../services/reconciliationService.js";
+import { syncWalletBalances } from "../services/balanceSyncService.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -60,10 +62,19 @@ async function createPrivyWallet(chainType = "solana") {
   return r.data;
 }
 
+async function getWalletByUserId(userId) {
+  const result = await pool.query(
+    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary
+     FROM wallets WHERE user_id = $1 ORDER BY is_primary DESC LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
 async function getWalletByUserIdAndChain(userId, chainType) {
   const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary
-     FROM wallets WHERE user_id = $1 AND chain = $2 LIMIT 1`,
+    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary
+     FROM wallets WHERE user_id = $1 AND chain = $2 ORDER BY is_primary DESC LIMIT 1`,
     [userId, chainType]
   );
   return result.rows[0] || null;
@@ -106,7 +117,7 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
   // Try DB first if configured
   if (process.env.DATABASE_URL) {
     try {
-      const existing = await getWalletByUserIdAndChain(userId, chainType);
+      const existing = await getWalletByUserId(userId);
       if (existing) {
         await pool.query(
           `UPDATE wallets SET last_accessed_at = NOW() WHERE id = $1`,
@@ -400,6 +411,67 @@ export const sendTxToAddress = async (req, res) => {
     return res
       .status(err?.response?.status || 500)
       .json({ ok: false, error: err?.response?.data || err.message });
+  }
+};
+
+// GET /wallet/deposit-address — retrieve permanent Solana deposit address and summary balances
+export const getDepositAddress = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  }
+
+  try {
+    const wallet = await getWalletByUserId(userId);
+    if (!wallet) {
+      return res.status(404).json({ ok: false, error: 'Wallet not found' });
+    }
+
+    const usdcBalance = await getAppLedgerBalance(userId, 'USDC');
+    const solBalance = await getAppLedgerBalance(userId, 'SOL');
+
+    return res.json({
+      ok: true,
+      data: {
+        address: wallet.address,
+        chain: wallet.chain,
+        is_primary: wallet.is_primary,
+        last_synced_at: wallet.last_synced_at || wallet.last_scanned_at || wallet.last_accessed_at,
+        balances: {
+          SOL: solBalance,
+          USDC: usdcBalance,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('getDepositAddress error', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to fetch deposit address' });
+  }
+};
+
+// GET /wallet/balances — compare on-chain and app balances for the primary wallet
+export const getWalletBalances = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  }
+
+  try {
+    const wallet = await getWalletByUserId(userId);
+    if (!wallet) {
+      return res.status(404).json({ ok: false, error: 'Wallet not found' });
+    }
+
+    const balanceResult = await syncWalletBalances(wallet);
+    await pool.query(
+      `UPDATE wallets SET last_synced_at = NOW() WHERE id = $1`,
+      [wallet.id]
+    );
+
+    return res.json({ ok: true, data: { ...balanceResult, last_synced_at: new Date().toISOString() } });
+  } catch (err) {
+    console.error('getWalletBalances error', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to fetch wallet balances' });
   }
 };
 
