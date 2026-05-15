@@ -5,6 +5,7 @@ const AdminUsersPage = ({ user }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [roleChanges, setRoleChanges] = useState({});
+  const [filter, setFilter] = useState('');
 
   const token = localStorage.getItem('authToken');
   const canUpdateRoles = user?.role === 'admin';
@@ -77,11 +78,29 @@ const AdminUsersPage = ({ user }) => {
     }
   };
 
+  const filteredUsers = users.filter((userRecord) =>
+    userRecord.email.toLowerCase().includes(filter.toLowerCase()) ||
+    userRecord.role?.toLowerCase().includes(filter.toLowerCase())
+  );
+
   return (
-    <div className="admin-section">
+    <div className="admin-section admin-users-page">
       <div className="admin-section-header">
-        <h2>User Management</h2>
-        <p>View system users and apply support-safe account controls.</p>
+        <div>
+          <h2>User Management</h2>
+          <p>View users, adjust roles, and manage account status from a single admin panel.</p>
+        </div>
+        <div className="admin-page-actions">
+          <input
+            className="search-input"
+            placeholder="Search users by email or role"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <button className="btn btn-secondary" onClick={fetchUsers} disabled={loading}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="admin-table-overflow">
@@ -96,7 +115,7 @@ const AdminUsersPage = ({ user }) => {
             </tr>
           </thead>
           <tbody>
-            {users.map((userRecord) => (
+            {filteredUsers.map((userRecord) => (
               <tr key={userRecord.id}>
                 <td>{userRecord.email}</td>
                 <td>
@@ -114,25 +133,23 @@ const AdminUsersPage = ({ user }) => {
                       <option value="admin">admin</option>
                     </select>
                   ) : (
-                    userRecord.role
+                    <span className={`status-pill ${userRecord.role}`}>{userRecord.role}</span>
                   )}
                 </td>
-                <td>{userRecord.is_frozen ? 'Frozen' : 'Active'}</td>
+                <td>
+                  <span className={`status-pill ${userRecord.is_frozen ? 'red' : 'green'}`}>
+                    {userRecord.is_frozen ? 'Frozen' : 'Active'}
+                  </span>
+                </td>
                 <td>{new Date(userRecord.created_at).toLocaleString()}</td>
                 <td className="admin-actions-cell">
-                  {userRecord.is_frozen ? (
-                    <button className="btn btn-secondary" onClick={() => changeFreezeState(userRecord.id, 'unfreeze')}>
-                      Unfreeze
-                    </button>
-                  ) : (
-                    <button className="btn btn-secondary" onClick={() => changeFreezeState(userRecord.id, 'freeze')}>
-                      Freeze
-                    </button>
-                  )}
+                  <button className="btn btn-secondary" onClick={() => changeFreezeState(userRecord.id, userRecord.is_frozen ? 'unfreeze' : 'freeze')}>
+                    {userRecord.is_frozen ? 'Unfreeze' : 'Freeze'}
+                  </button>
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {filteredUsers.length === 0 && (
               <tr>
                 <td colSpan="5">No users found.</td>
               </tr>

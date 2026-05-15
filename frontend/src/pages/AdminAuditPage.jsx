@@ -41,10 +41,10 @@ const AdminAuditPage = ({ user }) => {
   }
 
   return (
-    <div className="admin-section">
+    <div className="admin-section admin-audit-page">
       <div className="admin-section-header">
         <h2>Audit Logs</h2>
-        <p>Review recent system actions and operational events.</p>
+        <p>Review recent system actions, changes, and high-risk operational events.</p>
       </div>
 
       <div className="admin-table-overflow">
@@ -64,7 +64,16 @@ const AdminAuditPage = ({ user }) => {
                 <td>{log.action}</td>
                 <td>{log.user_id || 'System'}</td>
                 <td>{log.amount ? `${log.amount} ${log.asset || ''}` : '-'}</td>
-                <td>{log.metadata ? JSON.stringify(log.metadata) : '-'}</td>
+                <td>
+                  {log.metadata ? (
+                    <details>
+                      <summary>View details</summary>
+                      <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                    </details>
+                  ) : (
+                    '-'
+                  )}
+                </td>
                 <td>{new Date(log.created_at).toLocaleString()}</td>
               </tr>
             ))}

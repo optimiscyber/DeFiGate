@@ -55,10 +55,15 @@ const AdminWithdrawalsPage = ({ user }) => {
   };
 
   return (
-    <div className="admin-section">
+    <div className="admin-section admin-withdrawals-page">
       <div className="admin-section-header">
-        <h2>Pending Withdrawals</h2>
-        <p>Approve or reject withdrawal requests that are waiting for review.</p>
+        <div>
+          <h2>Pending Withdrawals</h2>
+          <p>Review, approve, or reject withdrawal requests with clear context and reasoning.</p>
+        </div>
+        <button className="btn btn-secondary" onClick={fetchPending} disabled={loading}>
+          Refresh
+        </button>
       </div>
 
       <div className="admin-table-overflow">
@@ -74,44 +79,40 @@ const AdminWithdrawalsPage = ({ user }) => {
             </tr>
           </thead>
           <tbody>
-            {withdrawals.map((withdrawal) => (
-              <tr key={withdrawal.id || withdrawal.transaction_id}>
-                <td>{withdrawal.id || withdrawal.transaction_id}</td>
-                <td>{withdrawal.user_id || withdrawal.user?.email || 'Unknown'}</td>
-                <td>{withdrawal.amount} {withdrawal.asset || 'USDC'}</td>
-                <td>{withdrawal.recipient_address || withdrawal.recipient_address || 'N/A'}</td>
-                <td>{new Date(withdrawal.created_at).toLocaleString()}</td>
-                <td>
-                  <div className="admin-actions-cell">
-                    <button className="btn btn-primary" onClick={() => handleAction(withdrawal.id || withdrawal.transaction_id, 'approve')}>
-                      Approve
-                    </button>
-                    <button className="btn btn-secondary" onClick={() => handleAction(withdrawal.id || withdrawal.transaction_id, 'reject')}>
-                      Reject
-                    </button>
-                  </div>
-                  <textarea
-                    rows="2"
-                    placeholder="Rejection reason"
-                    value={rejectionReasons[withdrawal.id || withdrawal.transaction_id] || ''}
-                    onChange={(e) => {
-                      setRejectionReasons((prev) => ({
-                        ...prev,
-                        [withdrawal.id || withdrawal.transaction_id]: e.target.value,
-                      }));
-                    }}
-                    style={{
-                      width: '100%',
-                      marginTop: '10px',
-                      padding: '10px',
-                      borderRadius: '10px',
-                      border: '1px solid var(--border)',
-                      resize: 'vertical',
-                    }}
-                  />
-                </td>
-              </tr>
-            ))}
+            {withdrawals.map((withdrawal) => {
+              const id = withdrawal.id || withdrawal.transaction_id;
+              return (
+                <tr key={id}>
+                  <td>{id}</td>
+                  <td>{withdrawal.user_id || withdrawal.user?.email || 'Unknown'}</td>
+                  <td>{withdrawal.amount} {withdrawal.asset || 'USDC'}</td>
+                  <td>{withdrawal.recipient_address || 'N/A'}</td>
+                  <td>{new Date(withdrawal.created_at).toLocaleString()}</td>
+                  <td>
+                    <div className="admin-actions-cell">
+                      <button className="btn btn-primary" onClick={() => handleAction(id, 'approve')}>
+                        Approve
+                      </button>
+                      <button className="btn btn-secondary" onClick={() => handleAction(id, 'reject')}>
+                        Reject
+                      </button>
+                    </div>
+                    <textarea
+                      rows="2"
+                      className="note-input"
+                      placeholder="Rejection reason"
+                      value={rejectionReasons[id] || ''}
+                      onChange={(e) => {
+                        setRejectionReasons((prev) => ({
+                          ...prev,
+                          [id]: e.target.value,
+                        }));
+                      }}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
             {withdrawals.length === 0 && (
               <tr>
                 <td colSpan="6">No pending withdrawals found.</td>

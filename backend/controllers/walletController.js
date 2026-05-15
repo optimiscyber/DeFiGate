@@ -12,6 +12,11 @@ import { logAuditEvent, AUDIT_ACTIONS } from "../services/auditService.js";
 import { getAppLedgerBalance } from "../services/reconciliationService.js";
 import { syncWalletBalances } from "../services/balanceSyncService.js";
 import {
+  getCanonicalWallet,
+  getCanonicalWalletByWalletId,
+  getAllCanonicalWallets,
+} from "../services/walletService.js";
+import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   getAccount,
@@ -63,44 +68,43 @@ async function createPrivyWallet(chainType = "solana") {
 }
 
 async function getWalletByUserId(userId) {
-  const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary
-     FROM wallets WHERE user_id = $1 ORDER BY is_primary DESC LIMIT 1`,
-    [userId]
-  );
-  return result.rows[0] || null;
+  return getCanonicalWallet(userId, "solana");
 }
 
 async function getWalletByUserIdAndChain(userId, chainType) {
-  const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary
-     FROM wallets WHERE user_id = $1 AND chain = $2 ORDER BY is_primary DESC LIMIT 1`,
-    [userId, chainType]
-  );
-  return result.rows[0] || null;
+  return getCanonicalWallet(userId, chainType);
 }
 
 async function saveWallet(userId, privyWallet, chainType = "solana") {
+  const existing = await getCanonicalWallet(userId, chainType);
+  if (existing) {
+    return existing;
+  }
+
   const providerWalletId = privyWallet.id || null;
   const address =
     (privyWallet.accounts && privyWallet.accounts[0]?.address) ||
     privyWallet.address ||
     null;
 
-  const insert = await pool.query(
-    `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain, last_accessed_at, is_primary)
-     VALUES ($1, $2, $3, $4, $5, NOW(), true)
-     RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary`,
-    [userId, "privy", providerWalletId, address, chainType]
-  );
+  try {
+    const insert = await pool.query(
+      `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain, encrypted_private_key, is_primary, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
+       ON CONFLICT (user_id, chain) DO NOTHING
+       RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary`,
+      [userId, "privy", providerWalletId, address, chainType, null]
+    );
 
-  // update user record for easier query
-  await pool.query(
-    `UPDATE users SET privy_wallet_id = $1, updated_at = NOW() WHERE id = $2`,
-    [providerWalletId, userId]
-  );
+    if (insert.rows[0]) {
+      return insert.rows[0];
+    }
 
-  return insert.rows[0];
+    return await getCanonicalWallet(userId, chainType);
+  } catch (error) {
+    console.error("saveWallet error", error?.message || error);
+    return await getCanonicalWallet(userId, chainType);
+  }
 }
 
 export async function ensureUserWallet(userId, email, chainType = "solana") {

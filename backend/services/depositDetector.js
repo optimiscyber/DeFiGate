@@ -1,5 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Transaction, LedgerEntry, Wallet } from '../models/index.js';
+import { getAllCanonicalWallets } from '../services/walletService.js';
+import { creditAccount, getOrCreateAccount } from '../services/accountService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -198,17 +200,16 @@ async function processSolDeposit(wallet, signature) {
       { transaction }
     );
 
-    await LedgerEntry.create(
-      {
+    await creditAccount(wallet.user_id, amountSol, {
+      asset: 'SOL',
+      walletId: wallet.id,
+      txHash: signature,
+      metadata: {
+        source: 'deposit_detector',
         transaction_id: depositTransaction.id,
-        debit_account_id: systemAccount.id,
-        credit_account_id: userAccount.id,
-        amount: amountSol,
       },
-      { transaction }
-    );
-
-    await userAccount.increment({ available_balance: amountSol }, { transaction });
+      transaction,
+    });
   });
 
   console.log(`SOL deposit detected: ${amountSol} SOL for wallet ${wallet.address}`);
@@ -277,17 +278,16 @@ async function processUsdcDeposit(wallet, signature) {
       { transaction }
     );
 
-    await LedgerEntry.create(
-      {
+    await creditAccount(wallet.user_id, amountString, {
+      asset: 'USDC',
+      walletId: wallet.id,
+      txHash: signature,
+      metadata: {
+        source: 'deposit_detector',
         transaction_id: depositTransaction.id,
-        debit_account_id: systemAccount.id,
-        credit_account_id: userAccount.id,
-        amount: amountString,
       },
-      { transaction }
-    );
-
-    await userAccount.increment({ available_balance: amountString }, { transaction });
+      transaction,
+    });
   });
 
   console.log(`USDC deposit detected: ${amountString} USDC for wallet ${wallet.address}`);
@@ -396,10 +396,7 @@ async function scanWalletSignatures(wallet) {
 
 export async function checkDeposits() {
   try {
-    const wallets = await Wallet.findAll({
-      where: { chain: 'solana' },
-      attributes: ['id', 'user_id', 'address', 'last_scanned_signature', 'last_scanned_at'],
-    });
+    const wallets = await getAllCanonicalWallets('solana');
 
     for (const wallet of wallets) {
       if (!wallet.address || !isSolanaAddress(wallet.address)) continue;

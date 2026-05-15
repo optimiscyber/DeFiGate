@@ -11,6 +11,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { Op } from 'sequelize';
 import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
+import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/accountService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 dotenv.config();
@@ -195,13 +196,11 @@ export async function processUSDCWithdrawal(userId, walletId, recipientAddress, 
     if (!userAccount) {
       throw new Error('User account not found');
     }
-    const availableBalance = parseFloat(userAccount.available_balance || 0);
-    if (availableBalance < withdrawalAmount) {
-      throw new Error('Insufficient balance');
-    }
 
-    await userAccount.decrement({ available_balance: withdrawalAmount }, { transaction: tx });
-    await userAccount.increment({ pending_balance: withdrawalAmount }, { transaction: tx });
+    await reserveFunds(userId, withdrawalAmount, {
+      asset: 'USDC',
+      transaction: tx,
+    });
 
     const withdrawalTransaction = await Transaction.create(
       {
@@ -308,8 +307,10 @@ export async function rejectWithdrawal(transactionId, operatorUserId, reason = '
     }
 
     const amount = parseFloat(withdrawalTransaction.amount || 0);
-    await userAccount.decrement({ pending_balance: amount }, { transaction: tx });
-    await userAccount.increment({ available_balance: amount }, { transaction: tx });
+    await releaseFunds(userAccount.user_id, amount, {
+      asset: 'USDC',
+      transaction: tx,
+    });
 
     const beforeStatus = withdrawalTransaction.status;
     withdrawalTransaction.status = 'rejected';
@@ -384,14 +385,10 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
   } catch (error) {
     const amountValue = parseFloat(withdrawalTransaction.amount || 0);
     await sequelize.transaction(async (refundTx) => {
-      const userAccount = await Account.findOne({
-        where: { user_id: withdrawalTransaction.user_id, asset: 'USDC' },
+      await releaseFunds(withdrawalTransaction.user_id, amountValue, {
+        asset: 'USDC',
         transaction: refundTx,
-        lock: refundTx.LOCK.UPDATE,
       });
-      if (!userAccount) throw new Error('User account not found during refund');
-      await userAccount.decrement({ pending_balance: amountValue }, { transaction: refundTx });
-      await userAccount.increment({ available_balance: amountValue }, { transaction: refundTx });
       withdrawalTransaction.status = 'failed';
       withdrawalTransaction.failed_at = new Date();
       withdrawalTransaction.failure_reason = error.message;
@@ -428,21 +425,35 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
       const confirmedTx = await Transaction.findByPk(transactionId);
       if (!confirmedTx) return;
       if (confirmation.confirmed && confirmation.success) {
-        await confirmedTx.update({
-          status: 'confirmed',
-          confirmed_at: new Date(),
-          network_fee: confirmation.fee || 0,
+        const amountValue = parseFloat(confirmedTx.amount || 0);
+        await sequelize.transaction(async (tx) => {
+          await commitReservedFunds(confirmedTx.user_id, amountValue, {
+            asset: 'USDC',
+            walletId: confirmedTx.wallet_id,
+            txHash: txHash,
+            metadata: {
+              source: 'withdrawal_confirmation',
+              withdrawal_id: confirmedTx.id,
+            },
+            transaction: tx,
+          });
+
+          await confirmedTx.update(
+            {
+              status: 'confirmed',
+              confirmed_at: new Date(),
+              network_fee: confirmation.fee || 0,
+            },
+            { transaction: tx }
+          );
         });
       } else {
         await sequelize.transaction(async (refundTx) => {
-          const userAccount = await Account.findOne({
-            where: { user_id: confirmedTx.user_id, asset: 'USDC' },
-            transaction: refundTx,
-            lock: refundTx.LOCK.UPDATE,
-          });
           const amountValue = parseFloat(confirmedTx.amount || 0);
-          await userAccount.decrement({ pending_balance: amountValue }, { transaction: refundTx });
-          await userAccount.increment({ available_balance: amountValue }, { transaction: refundTx });
+          await releaseFunds(confirmedTx.user_id, amountValue, {
+            asset: 'USDC',
+            transaction: refundTx,
+          });
           await confirmedTx.update(
             {
               status: 'failed',
@@ -459,19 +470,11 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
       const confirmedTx = await Transaction.findByPk(transactionId);
       if (!confirmedTx) return;
       await sequelize.transaction(async (refundTx) => {
-        const userAccount = await Account.findOne({
-          where: { user_id: confirmedTx.user_id, asset: 'USDC' },
-          transaction: refundTx,
-          lock: refundTx.LOCK.UPDATE,
-        });
         const amountValue = parseFloat(confirmedTx.amount || 0);
-        await userAccount.decrement({ pending_balance: amountValue }, { transaction: refundTx });
-        await userAccount.increment({ available_balance: amountValue }, { transaction: refundTx });
-        await confirmedTx.update(
-          {
-            status: 'failed',
-            failed_at: new Date(),
-            failure_reason: 'Confirmation process failed',
+        await releaseFunds(confirmedTx.user_id, amountValue, {
+          asset: 'USDC',
+          transaction: refundTx,
+        });
           },
           { transaction: refundTx }
         );

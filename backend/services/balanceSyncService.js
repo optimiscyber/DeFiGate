@@ -1,6 +1,8 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Wallet, Transaction, LedgerEntry } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
+import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
+import { creditAccount, getOrCreateAccount } from '../services/accountService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -209,7 +211,17 @@ export async function syncAllUserWallets(options = {}) {
     where.id = options.walletId;
   }
 
-  const wallets = await Wallet.findAll({ where });
+  let wallets;
+  if (options.walletId) {
+    wallets = [];
+    const wallet = await getCanonicalWalletByWalletId(options.walletId);
+    if (wallet) wallets.push(wallet);
+  } else if (options.userId) {
+    const wallet = await getCanonicalWallet(options.userId, 'solana');
+    wallets = wallet ? [wallet] : [];
+  } else {
+    wallets = await getAllCanonicalWallets('solana');
+  }
   const results = [];
   for (const wallet of wallets) {
     if (!wallet.address) continue;
@@ -237,7 +249,17 @@ export async function repairMissingDeposits(options = {}) {
     where.id = options.walletId;
   }
 
-  const wallets = await Wallet.findAll({ where });
+  let wallets;
+  if (options.walletId) {
+    wallets = [];
+    const wallet = await getCanonicalWalletByWalletId(options.walletId);
+    if (wallet) wallets.push(wallet);
+  } else if (options.userId) {
+    const wallet = await getCanonicalWallet(options.userId, 'solana');
+    wallets = wallet ? [wallet] : [];
+  } else {
+    wallets = await getAllCanonicalWallets('solana');
+  }
   const repairs = [];
 
   for (const wallet of wallets) {
@@ -268,11 +290,18 @@ export async function repairMissingDeposits(options = {}) {
       if (sol > 0n) {
         const amount = Number(sol) / LAMPORTS_PER_SOL;
         await sequelize.transaction(async (transaction) => {
-          const account = await ensureUserAccount(wallet.user_id, 'SOL');
-          const systemAccount = await ensureSystemAccountForAsset('SOL', transaction);
+          await getOrCreateAccount(wallet.user_id, 'SOL', transaction);
           const depositTx = await createDepositTransaction(wallet, amount, 'SOL', txHash, transaction);
-          await createLedgerEntry(depositTx.id, systemAccount.id, account.id, amount, transaction);
-          await account.increment({ available_balance: amount }, { transaction });
+          await creditAccount(wallet.user_id, amount, {
+            asset: 'SOL',
+            walletId: wallet.id,
+            txHash,
+            metadata: {
+              source: 'repair_missing_deposit',
+              transaction_id: depositTx.id,
+            },
+            transaction,
+          });
           txResults.push({ asset: 'SOL', amount });
         });
       }
@@ -280,11 +309,18 @@ export async function repairMissingDeposits(options = {}) {
       if (usdc > 0n) {
         const amount = Number(usdc) / 1_000_000;
         await sequelize.transaction(async (transaction) => {
-          const account = await ensureUserAccount(wallet.user_id, 'USDC');
-          const systemAccount = await ensureSystemAccountForAsset('USDC', transaction);
+          await getOrCreateAccount(wallet.user_id, 'USDC', transaction);
           const depositTx = await createDepositTransaction(wallet, amount, 'USDC', txHash, transaction);
-          await createLedgerEntry(depositTx.id, systemAccount.id, account.id, amount, transaction);
-          await account.increment({ available_balance: amount }, { transaction });
+          await creditAccount(wallet.user_id, amount, {
+            asset: 'USDC',
+            walletId: wallet.id,
+            txHash,
+            metadata: {
+              source: 'repair_missing_deposit',
+              transaction_id: depositTx.id,
+            },
+            transaction,
+          });
           txResults.push({ asset: 'USDC', amount });
         });
       }

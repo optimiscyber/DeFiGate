@@ -1,7 +1,7 @@
 import { sequelize } from "../models/index.js";
 import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
-import LedgerEntry from "../models/LedgerEntry.js";
+import { creditAccount, debitAccount } from '../services/accountService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_ASSET = "USDC";
@@ -94,18 +94,27 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
         throw new Error("INSUFFICIENT_FUNDS");
       }
 
-      await LedgerEntry.create(
-        {
-          transaction_id: transactionRecord.id,
-          debit_account_id: senderAccount.id,
-          credit_account_id: receiverAccount.id,
-          amount: amountString,
+      await debitAccount(senderId, amountString, {
+        asset,
+        walletId: null,
+        txHash: `transfer_${transactionRecord.id}`,
+        metadata: {
+          transfer_id: transactionRecord.id,
+          receiver_id: receiverId,
         },
-        { transaction: tx }
-      );
+        transaction: tx,
+      });
 
-      await senderAccount.decrement({ available_balance: amountString }, { transaction: tx });
-      await receiverAccount.increment({ available_balance: amountString }, { transaction: tx });
+      await creditAccount(receiverId, amountString, {
+        asset,
+        walletId: null,
+        txHash: `transfer_${transactionRecord.id}`,
+        metadata: {
+          transfer_id: transactionRecord.id,
+          sender_id: senderId,
+        },
+        transaction: tx,
+      });
     });
 
     transactionRecord.status = "completed";

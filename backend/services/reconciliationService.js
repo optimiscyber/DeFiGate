@@ -2,6 +2,8 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Transaction, Wallet, AuditLog } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
+import { getDerivedBalance, creditAccount, getOrCreateAccount } from '../services/accountService.js';
 import { Op } from 'sequelize';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -59,27 +61,7 @@ async function getBlockchainUSDCBalance(walletAddress) {
  * Get app ledger balance for a user (only completed transactions)
  */
 export async function getAppLedgerBalance(userId, asset = 'USDC') {
-  const account = await Account.findOne({
-    where: { user_id: userId, asset },
-  });
-
-  if (!account) return 0;
-
-  // Calculate balance from ONLY completed ledger entries
-  const [result] = await sequelize.query(`
-    SELECT
-      COALESCE(SUM(CASE WHEN le.credit_account_id = a.id THEN le.amount END), 0) -
-      COALESCE(SUM(CASE WHEN le.debit_account_id = a.id THEN le.amount END), 0) as ledger_balance
-    FROM accounts a
-    LEFT JOIN ledger_entries le ON (le.debit_account_id = a.id OR le.credit_account_id = a.id)
-    LEFT JOIN transactions t ON le.transaction_id = t.id
-    WHERE a.id = ? AND (t.status = 'completed' OR t.status IS NULL)
-  `, {
-    replacements: [account.id],
-    type: sequelize.QueryTypes.SELECT
-  });
-
-  return parseFloat(result.ledger_balance || 0);
+  return getDerivedBalance(userId, asset);
 }
 
 /**
@@ -226,11 +208,13 @@ export async function runReconciliation(options = {}) {
 
   let wallets;
   if (walletId) {
-    wallets = await Wallet.findAll({ where: { id: walletId } });
+    const wallet = await getCanonicalWalletByWalletId(walletId);
+    wallets = wallet ? [wallet] : [];
   } else if (userId) {
-    wallets = await Wallet.findAll({ where: { user_id: userId } });
+    const wallet = await getCanonicalWallet(userId, 'solana');
+    wallets = wallet ? [wallet] : [];
   } else {
-    wallets = await Wallet.findAll({ where: { chain: 'solana' } });
+    wallets = await getAllCanonicalWallets('solana');
   }
 
   const results = [];
@@ -260,7 +244,7 @@ export async function runReconciliation(options = {}) {
 }
 
 export async function reconcileWallet(walletId) {
-  const wallet = await Wallet.findByPk(walletId);
+  const wallet = await getCanonicalWalletByWalletId(walletId);
   if (!wallet || !wallet.address) {
     return {
       wallet_id: walletId,
@@ -354,14 +338,17 @@ export async function autoRepairSafeMismatches() {
             tx_hash: `repair_${Date.now()}_${wallet.id}_${asset}`,
           }, { transaction });
 
-          await sequelize.models.LedgerEntry.create({
-            transaction_id: repairTransaction.id,
-            debit_account_id: systemAccount.id,
-            credit_account_id: userAccount.id,
-            amount: result.difference.toString(),
-          }, { transaction });
-
-          await userAccount.increment({ available_balance: result.difference.toString() }, { transaction });
+          await getOrCreateAccount(wallet.user_id, asset, transaction);
+          await creditAccount(wallet.user_id, result.difference.toString(), {
+            asset,
+            walletId: wallet.id,
+            txHash: repairTransaction.tx_hash,
+            metadata: {
+              source: 'auto_repair_reconciliation',
+              transaction_id: repairTransaction.id,
+            },
+            transaction,
+          });
 
           await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_REPROCESSED, {
             user_id: wallet.user_id,

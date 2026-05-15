@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { Op } from 'sequelize';
 import { Wallet, Transaction } from '../models/index.js';
+import { getAllCanonicalWallets } from '../services/walletService.js';
 import { runReconciliation, autoRepairSafeMismatches } from './reconciliationService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
@@ -11,12 +12,7 @@ const SOLANA_DECIMALS = 9;
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 async function checkSolGasBalances() {
-  const wallets = await Wallet.findAll({
-    where: {
-      chain: 'solana',
-    },
-    attributes: ['id', 'address', 'provider', 'provider_wallet_id'],
-  });
+  const wallets = await getAllCanonicalWallets('solana');
 
   for (const wallet of wallets) {
     if (!wallet.address) continue;

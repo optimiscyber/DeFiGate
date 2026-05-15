@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import pool from "../db.js";
 import { generateToken } from "../middleware/auth.js";
-import { ensureUserWallet } from "./walletController.js";
+import { ensureUserWallet, getCanonicalWallet } from "./walletController.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Balance from "../models/Balance.js";
@@ -152,7 +152,10 @@ export const signin = async (req, res) => {
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(user.id, user.email, user.preferred_chain || "solana");
+      wallet = await getCanonicalWallet(user.id, user.preferred_chain || "solana");
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("DB signin wallet error", err?.message || err);
       wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
@@ -467,7 +470,10 @@ export const getMe = async (req, res) => {
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(fullUser.id, fullUser.email, "solana");
+      wallet = await getCanonicalWallet(fullUser.id, "solana");
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("getMe wallet error", err?.message || err);
       wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
