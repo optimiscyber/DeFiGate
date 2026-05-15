@@ -43,6 +43,13 @@ const Account = sequelize.define(
     timestamps: true,
     createdAt: false,
     updatedAt: "updated_at",
+    indexes: [
+      {
+        unique: true,
+        fields: ["user_id", "asset"],
+        name: "accounts_user_asset_unique",
+      },
+    ],
   }
 );
 

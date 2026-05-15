@@ -100,6 +100,19 @@ async function addLedgerEntry({
     { transaction }
   );
 
+  await logAuditEvent(AUDIT_ACTIONS.ACCOUNT_LEDGER_ENTRY, {
+    user_id: userId,
+    wallet_id: walletId,
+    tx_hash: txHash,
+    amount: normalizedAmount,
+    asset: normalizeAsset(asset),
+    metadata: {
+      type,
+      source: metadata?.source || "account_service",
+      metadata,
+    },
+  });
+
   await syncAccountCache(userId, asset, transaction);
   return entry;
 }

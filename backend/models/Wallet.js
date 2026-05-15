@@ -65,6 +65,13 @@ const Wallet = sequelize.define(
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
+    indexes: [
+      {
+        unique: true,
+        fields: ["user_id", "chain"],
+        name: "wallets_user_chain_unique",
+      },
+    ],
   }
 );
 

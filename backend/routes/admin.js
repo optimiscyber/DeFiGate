@@ -13,6 +13,7 @@ router.use(authenticate);
 router.post('/reconcile', requireRole('admin'), admin.reconcile);
 router.post('/reconcile/:walletId', requireRole('admin'), admin.reconcileWallet);
 router.post('/deposits/reprocess', requireRole('admin'), admin.reprocessDeposit);
+router.post('/balances/adjust', requireRole('admin'), admin.adjustUserBalance);
 router.get('/audit-logs', requireRole('admin'), admin.getAuditLogsEndpoint);
 
 // Support-safe operational controls

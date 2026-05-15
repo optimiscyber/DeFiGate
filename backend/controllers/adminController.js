@@ -3,6 +3,7 @@ import { runReconciliation, autoRepairSafeMismatches } from '../services/reconci
 import { processDeposit } from '../services/depositDetector.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
+import { adjustAccount } from '../services/accountService.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
 import { respondError, respondSuccess } from '../utils/response.js';
 
@@ -154,6 +155,41 @@ export const reprocessDeposit = async (req, res) => {
   } catch (error) {
     console.error('Deposit reprocessing error:', error);
     respondError(res, 500, 'Deposit reprocessing failed', true, error.message);
+  }
+};
+
+export const adjustUserBalance = async (req, res) => {
+  try {
+    const { userId, asset, amount, reason } = req.body;
+    if (!userId || !asset || typeof amount !== 'number') {
+      return respondError(res, 400, 'userId, asset and numeric amount are required');
+    }
+
+    const adjustedAccount = await adjustAccount(parseInt(userId, 10), amount, {
+      asset,
+      txHash: `admin-adjust-${Date.now()}`,
+      metadata: { reason: reason || 'manual adjustment', admin_user_id: req.user?.id },
+    });
+
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'adjust_account_balance',
+        target_user_id: userId,
+        asset,
+        amount,
+        reason,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+
+    respondSuccess(res, {
+      adjustedAccount,
+    }, 'Account balance adjusted');
+  } catch (error) {
+    console.error('Balance adjustment error:', error);
+    respondError(res, 500, 'Balance adjustment failed', true, error.message);
   }
 };
 

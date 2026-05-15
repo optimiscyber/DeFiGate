@@ -4,13 +4,12 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { PublicKey } from '@solana/web3.js';
 import sequelize from "../config/database.js";
-import Balance from "../models/Balance.js";
-import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import { processUSDCWithdrawal, getWithdrawalStatus } from "../services/withdrawalService.js";
 import { logAuditEvent, AUDIT_ACTIONS } from '../services/auditService.js';
+import { getDerivedBalance, debitAccount, creditAccount } from '../services/accountService.js';
 dotenv.config();
 
 const inMemoryTransfers = new Map();
@@ -206,61 +205,43 @@ export const confirmTransfer = async (req, res) => {
       return res.status(401).json({ ok: false, error: "Invalid password" });
     }
 
-    // Transfer settlement: adjust balances and complete transfer atomically
-    await pool.query("BEGIN");
-
-    const senderBalanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [senderId]
-    );
-
-    if (senderBalanceResult.rows.length === 0) {
-      await pool.query("ROLLBACK");
-      return res.status(404).json({ ok: false, error: "Sender balance not found" });
-    }
-
-    const senderBalance = Number(senderBalanceResult.rows[0].available_balance || 0);
     const transferAmount = Number(transfer.amount || 0);
-
     if (Number.isNaN(transferAmount) || transferAmount <= 0) {
-      await pool.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Invalid transfer amount" });
     }
 
+    const senderBalance = await getDerivedBalance(senderId, transfer.token_symbol);
     if (senderBalance < transferAmount) {
-      await pool.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Insufficient funds" });
     }
 
-    const recipientBalanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [transfer.recipient_id]
-    );
+    const completedTransfer = await sequelize.transaction(async (tx) => {
+      await debitAccount(senderId, transferAmount, {
+        asset: transfer.token_symbol,
+        txHash: `transfer_${transfer.id}`,
+        metadata: { transferId: transfer.id, type: 'transfer_debit' },
+        transaction: tx,
+      });
 
-    if (recipientBalanceResult.rows.length === 0) {
-      await pool.query("ROLLBACK");
-      return res.status(404).json({ ok: false, error: "Recipient balance not found" });
-    }
+      await creditAccount(transfer.recipient_id, transferAmount, {
+        asset: transfer.token_symbol,
+        txHash: `transfer_${transfer.id}`,
+        metadata: { transferId: transfer.id, type: 'transfer_credit' },
+        transaction: tx,
+      });
 
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
-      [transferAmount, senderId]
-    );
+      const [_, updatedRows] = await Transaction.update(
+        { status: 'completed', completed_at: new Date() },
+        { where: { id: transferId }, transaction: tx, returning: true }
+      );
 
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
-      [transferAmount, transfer.recipient_id]
-    );
+      const updatedTransfer = Array.isArray(updatedRows) ? updatedRows[0] : null;
+      if (!updatedTransfer) {
+        throw new Error('Failed to update transfer status');
+      }
 
-    const updatedResult = await pool.query(
-      `UPDATE transfers SET status = $1, completed_at = NOW() WHERE id = $2
-       RETURNING id, sender_id, recipient_id, amount, token_symbol, chain, status, completed_at`,
-      ["completed", transferId]
-    );
-
-    await pool.query("COMMIT");
-
-    const completedTransfer = updatedResult.rows[0];
+      return updatedTransfer;
+    });
 
     // Clear PIN
     inMemoryPINs.delete(`${senderId}:${transferId}`);
