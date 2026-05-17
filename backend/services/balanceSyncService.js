@@ -48,28 +48,30 @@ function parseTokenAmount(tokenBalance) {
   return BigInt(String(tokenBalance.uiTokenAmount.amount || '0'));
 }
 
-function getDepositAmountsFromMeta(meta, walletAddress) {
-  if (!meta) return { sol: 0n, usdc: 0n };
+function getDepositAmountsFromMeta(tx, walletAddress) {
+  if (!tx || !tx.meta || tx.meta.err || !tx.transaction?.message?.accountKeys) {
+    return { sol: 0n, usdc: 0n };
+  }
 
+  const accountKeys = tx.transaction.message.accountKeys.map((key) => key.toString());
+  const walletIndex = accountKeys.findIndex((key) => key === walletAddress);
   let solDeposit = 0n;
-  if (Array.isArray(meta.preBalances) && Array.isArray(meta.postBalances)) {
-    for (let i = 0; i < Math.min(meta.preBalances.length, meta.postBalances.length); i++) {
-      const delta = BigInt(meta.postBalances[i] || 0) - BigInt(meta.preBalances[i] || 0);
-      if (delta > 0n) {
-        solDeposit += delta;
-      }
+  if (walletIndex >= 0 && Array.isArray(tx.meta.preBalances) && Array.isArray(tx.meta.postBalances)) {
+    const delta = BigInt(tx.meta.postBalances[walletIndex] || 0) - BigInt(tx.meta.preBalances[walletIndex] || 0);
+    if (delta > 0n) {
+      solDeposit = delta;
     }
   }
 
   const preUsdc = new Map();
-  for (const preToken of meta.preTokenBalances || []) {
+  for (const preToken of tx.meta.preTokenBalances || []) {
     if (preToken.owner !== walletAddress || preToken.mint !== USDC_MINT.toBase58()) continue;
     if (typeof preToken.accountIndex !== 'number') continue;
     preUsdc.set(preToken.accountIndex, parseTokenAmount(preToken));
   }
 
   let usdcDeposit = 0n;
-  for (const postToken of meta.postTokenBalances || []) {
+  for (const postToken of tx.meta.postTokenBalances || []) {
     if (postToken.owner !== walletAddress || postToken.mint !== USDC_MINT.toBase58()) continue;
     if (typeof postToken.accountIndex !== 'number') continue;
     const before = preUsdc.get(postToken.accountIndex) || 0n;
@@ -196,10 +198,28 @@ export async function syncWalletBalances(wallet) {
 
   await wallet.update({ last_synced_at: new Date() });
 
+  await logAuditEvent(AUDIT_ACTIONS.BALANCE_SYNCED, {
+    user_id: wallet.user_id,
+    wallet_id: wallet.id,
+    metadata: {
+      usdc: result.asset_balances.USDC,
+      sol: result.asset_balances.SOL,
+    },
+    request_id: `balance_sync_${Date.now()}`,
+  });
+
   return {
     ...result,
     last_synced_at: wallet.last_synced_at,
   };
+}
+
+export async function syncWalletBalancesById(walletId) {
+  const wallet = await getCanonicalWalletByWalletId(walletId);
+  if (!wallet) {
+    throw new Error(`Wallet not found: ${walletId}`);
+  }
+  return syncWalletBalances(wallet);
 }
 
 export async function syncAllUserWallets(options = {}) {
@@ -282,9 +302,9 @@ export async function repairMissingDeposits(options = {}) {
       if (existing) continue;
 
       const tx = await connection.getParsedTransaction(txHash, { commitment: 'confirmed' });
-      if (!tx || !tx.meta) continue;
+      if (!tx || !tx.meta || tx.meta.err) continue;
 
-      const { sol, usdc } = getDepositAmountsFromMeta(tx.meta, wallet.address);
+      const { sol, usdc } = getDepositAmountsFromMeta(tx, wallet.address);
       const txResults = [];
 
       if (sol > 0n) {
@@ -343,13 +363,35 @@ export async function repairMissingDeposits(options = {}) {
   return repairs;
 }
 
+async function withRetry(fn, attempts = 3, delayMs = 3000) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.warn(`Balance sync attempt ${attempt} failed:`, error?.message || error);
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export function startBalanceSyncJob(requestContext = {}) {
   const intervalMs = parseInt(process.env.BALANCE_SYNC_INTERVAL_MS || String(10 * 60 * 1000), 10);
-  syncAllUserWallets().catch((error) => {
+  const runSync = async () => {
+    await syncAllUserWallets();
+    await repairMissingDeposits();
+  };
+
+  withRetry(runSync).catch((error) => {
     console.error('Initial balance sync failed:', error?.message || error);
   });
+
   setInterval(() => {
-    syncAllUserWallets().catch((error) => {
+    withRetry(runSync).catch((error) => {
       console.error('Background balance sync failed:', error?.message || error);
     });
   }, intervalMs);

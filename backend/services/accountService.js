@@ -1,7 +1,7 @@
-import { sequelize, Account, Wallet, AccountLedger } from "../models/index.js";
-import { logAuditEvent, AUDIT_ACTIONS } from "./auditService.js";
+import { supabase } from '../config/supabase.js';
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
-const DEFAULT_ASSET = "USDC";
+const DEFAULT_ASSET = 'USDC';
 const AMOUNT_REGEX = /^-?\d+(?:\.\d{1,6})?$/;
 
 function normalizeAsset(asset) {
@@ -11,50 +11,76 @@ function normalizeAsset(asset) {
 function normalizeAmount(amount) {
   const amountString = String(amount).trim();
   if (!AMOUNT_REGEX.test(amountString)) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
   return amountString;
 }
 
-async function getOrCreateAccount(userId, asset = DEFAULT_ASSET, transaction = null) {
-  const [account] = await Account.findOrCreate({
-    where: { user_id: userId, asset: normalizeAsset(asset) },
-    defaults: {
-      available_balance: 0,
-      pending_balance: 0,
-      is_frozen: false,
-      freeze_reason: null,
-    },
-    transaction,
-  });
-  return account;
+async function rpcCall(functionName, params = {}) {
+  const { data, error } = await supabase.rpc(functionName, params);
+  if (error) {
+    throw new Error(error.message || `RPC ${functionName} failed`);
+  }
+  return data;
+}
+
+async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
+  const normalized = normalizeAsset(asset);
+  const payload = {
+    user_id: userId,
+    asset: normalized,
+    available_balance: 0,
+    pending_balance: 0,
+    is_frozen: false,
+    freeze_reason: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('balances')
+    .upsert(payload, { onConflict: ['user_id', 'asset'] })
+    .select('*')
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to get or create account');
+  }
+  return (data && data[0]) || null;
 }
 
 async function getRawDerivedBalance(userId, asset = DEFAULT_ASSET) {
-  const [result] = await sequelize.query(
-    `SELECT COALESCE(SUM(amount), 0) AS derived_balance
-     FROM account_ledger
-     WHERE user_id = $1 AND asset = $2`,
-    {
-      bind: [userId, normalizeAsset(asset)],
-      type: sequelize.QueryTypes.SELECT,
-    }
-  );
+  const normalized = normalizeAsset(asset);
+  const { data, error } = await supabase
+    .from('account_ledger')
+    .select('amount', { count: 'exact' })
+    .eq('user_id', userId)
+    .eq('asset', normalized);
 
-  return parseFloat(result.derived_balance || 0);
+  if (error) {
+    throw new Error(error.message || 'Failed to fetch derived balance');
+  }
+
+  let sum = 0;
+  for (const row of data || []) {
+    sum += parseFloat(row.amount || 0);
+  }
+  return sum;
 }
 
-async function syncAccountCache(userId, asset = DEFAULT_ASSET, transaction = null) {
+async function syncAccountCache(userId, asset = DEFAULT_ASSET) {
   const derivedBalance = await getRawDerivedBalance(userId, asset);
-  const account = await getOrCreateAccount(userId, asset, transaction);
+  const account = await getOrCreateAccount(userId, asset);
   const cachedBalance = parseFloat(account.available_balance || 0);
 
   if (Math.abs(cachedBalance - derivedBalance) > 0.000001) {
-    const update = { available_balance: derivedBalance };
-    if (transaction) {
-      await account.update(update, { transaction });
-    } else {
-      await account.update(update);
+    const updatePayload = { available_balance: derivedBalance, updated_at: new Date().toISOString() };
+    const { error } = await supabase
+      .from('balances')
+      .update(updatePayload)
+      .match({ user_id: userId, asset: normalizeAsset(asset) });
+
+    if (error) {
+      throw new Error(error.message || 'Failed to update account cache');
     }
 
     await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_MISMATCH, {
@@ -76,45 +102,48 @@ async function addLedgerEntry({
   userId,
   walletId = null,
   asset = DEFAULT_ASSET,
-  type = "adjustment",
+  type = 'adjustment',
   amount,
   txHash = null,
+  referenceId = null,
+  transferId = null,
   metadata = null,
-  transaction = null,
+  auditActorId = null,
+  transactionId = null,
 }) {
   if (!userId || !amount) {
-    throw new Error("INVALID_LEDGER_ENTRY");
+    throw new Error('INVALID_LEDGER_ENTRY');
   }
 
   const normalizedAmount = normalizeAmount(amount);
-  const entry = await AccountLedger.create(
-    {
-      user_id: userId,
-      wallet_id: walletId,
-      asset: normalizeAsset(asset),
-      type,
-      amount: normalizedAmount,
-      tx_hash: txHash,
-      metadata,
-    },
-    { transaction }
-  );
+  const normalizedAsset = normalizeAsset(asset);
+  const rpcParams = {
+    p_user_id: userId,
+    p_amount: normalizedAmount,
+    p_asset: normalizedAsset,
+    p_wallet_id: walletId,
+    p_tx_hash: txHash,
+    p_reference_id: referenceId,
+    p_transfer_id: transferId,
+    p_metadata: metadata || {},
+    p_audit_actor_id: auditActorId,
+    p_transaction_id: transactionId,
+  };
 
-  await logAuditEvent(AUDIT_ACTIONS.ACCOUNT_LEDGER_ENTRY, {
-    user_id: userId,
-    wallet_id: walletId,
-    tx_hash: txHash,
-    amount: normalizedAmount,
-    asset: normalizeAsset(asset),
-    metadata: {
-      type,
-      source: metadata?.source || "account_service",
-      metadata,
-    },
-  });
-
-  await syncAccountCache(userId, asset, transaction);
-  return entry;
+  switch (type) {
+    case 'deposit':
+      return await rpcCall('credit_account', rpcParams);
+    case 'withdrawal':
+      return await rpcCall('debit_account', rpcParams);
+    case 'adjustment':
+      return await rpcCall('adjust_account', rpcParams);
+    case 'reserve':
+      return await rpcCall('reserve_funds', rpcParams);
+    case 'release':
+      return await rpcCall('release_funds', rpcParams);
+    default:
+      throw new Error(`Unsupported ledger entry type: ${type}`);
+  }
 }
 
 export async function getDerivedBalance(userId, asset = DEFAULT_ASSET) {
@@ -123,149 +152,142 @@ export async function getDerivedBalance(userId, asset = DEFAULT_ASSET) {
 }
 
 export async function creditAccount(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, referenceId = null, transferId = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) <= 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
   return addLedgerEntry({
     userId,
     walletId,
     asset,
-    type: "deposit",
+    type: 'deposit',
     amount,
     txHash,
+    referenceId,
+    transferId,
     metadata,
-    transaction,
+    auditActorId,
+    transactionId,
   });
 }
 
 export async function debitAccount(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, referenceId = null, transferId = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) <= 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
   return addLedgerEntry({
     userId,
     walletId,
     asset,
-    type: "withdrawal",
-    amount: `-${normalizeAmount(amount)}`,
+    type: 'withdrawal',
+    amount,
     txHash,
+    referenceId,
+    transferId,
     metadata,
-    transaction,
+    auditActorId,
+    transactionId,
   });
 }
 
 export async function adjustAccount(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, referenceId = null, transferId = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) === 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
   return addLedgerEntry({
     userId,
     walletId,
     asset,
-    type: "adjustment",
+    type: 'adjustment',
     amount,
     txHash,
+    referenceId,
+    transferId,
     metadata,
-    transaction,
+    auditActorId,
+    transactionId,
   });
 }
 
-export async function freezeAccount(userId, asset = DEFAULT_ASSET, reason = "system freeze", transaction = null) {
-  const account = await getOrCreateAccount(userId, asset, transaction);
+export async function freezeAccount(userId, asset = DEFAULT_ASSET, reason = 'system freeze') {
+  const account = await getOrCreateAccount(userId, asset);
   const update = {
     is_frozen: true,
-    freeze_reason: String(reason || "frozen by system"),
+    freeze_reason: String(reason || 'frozen by system'),
+    updated_at: new Date().toISOString(),
   };
-  if (transaction) {
-    await account.update(update, { transaction });
-  } else {
-    await account.update(update);
-  }
+
+  const { error } = await supabase
+    .from('balances')
+    .update(update)
+    .match({ user_id: userId, asset: normalizeAsset(asset) });
+
+  if (error) throw new Error(error.message || 'Failed to freeze account');
+
   await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
     user_id: userId,
     wallet_id: account.id,
     metadata: {
-      action: "freeze_account",
+      action: 'freeze_account',
       asset: normalizeAsset(asset),
       reason,
     },
   });
-  return account;
+  return await getOrCreateAccount(userId, asset);
 }
 
 export async function reserveFunds(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, metadata = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) <= 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
 
-  const account = await getOrCreateAccount(userId, asset, transaction);
-  const current = parseFloat(account.available_balance || 0);
-  if (current < parseFloat(amount)) {
-    throw new Error("INSUFFICIENT_FUNDS");
-  }
-
-  const update = {
-    available_balance: (current - parseFloat(amount)).toString(),
-    pending_balance: (parseFloat(account.pending_balance || 0) + parseFloat(amount)).toString(),
-  };
-
-  await account.update(update, transaction ? { transaction } : undefined);
-  return account;
+  return await rpcCall('reserve_funds', {
+    p_user_id: userId,
+    p_amount: normalizeAmount(amount),
+    p_asset: normalizeAsset(asset),
+    p_metadata: metadata || {},
+    p_audit_actor_id: auditActorId,
+    p_transaction_id: transactionId,
+  });
 }
 
 export async function releaseFunds(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, metadata = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) <= 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
 
-  const account = await getOrCreateAccount(userId, asset, transaction);
-  const currentPending = parseFloat(account.pending_balance || 0);
-  if (currentPending < parseFloat(amount)) {
-    throw new Error("INSUFFICIENT_PENDING_FUNDS");
-  }
-
-  const update = {
-    available_balance: (parseFloat(account.available_balance || 0) + parseFloat(amount)).toString(),
-    pending_balance: (currentPending - parseFloat(amount)).toString(),
-  };
-
-  await account.update(update, transaction ? { transaction } : undefined);
-  return account;
+  return await rpcCall('release_funds', {
+    p_user_id: userId,
+    p_amount: normalizeAmount(amount),
+    p_asset: normalizeAsset(asset),
+    p_metadata: metadata || {},
+    p_audit_actor_id: auditActorId,
+    p_transaction_id: transactionId,
+  });
 }
 
 export async function commitReservedFunds(userId, amount, options = {}) {
-  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, transaction = null } = options;
+  const { asset = DEFAULT_ASSET, walletId = null, txHash = null, metadata = null, referenceId = null, transferId = null, auditActorId = null, transactionId = null } = options;
   if (parseFloat(amount) <= 0) {
-    throw new Error("INVALID_AMOUNT");
+    throw new Error('INVALID_AMOUNT');
   }
 
-  const account = await getOrCreateAccount(userId, asset, transaction);
-  const currentPending = parseFloat(account.pending_balance || 0);
-  if (currentPending < parseFloat(amount)) {
-    throw new Error("INSUFFICIENT_PENDING_FUNDS");
-  }
-
-  await addLedgerEntry({
-    userId,
-    walletId,
-    asset,
-    type: "withdrawal",
-    amount: `-${normalizeAmount(amount)}`,
-    txHash,
-    metadata,
-    transaction,
+  return await rpcCall('commit_reserved_funds', {
+    p_user_id: userId,
+    p_amount: normalizeAmount(amount),
+    p_asset: normalizeAsset(asset),
+    p_wallet_id: walletId,
+    p_tx_hash: txHash,
+    p_reference_id: referenceId,
+    p_transfer_id: transferId,
+    p_metadata: metadata || {},
+    p_audit_actor_id: auditActorId,
+    p_transaction_id: transactionId,
   });
-
-  const update = {
-    pending_balance: (currentPending - parseFloat(amount)).toString(),
-  };
-  await account.update(update, transaction ? { transaction } : undefined);
-  return account;
 }
 
 export async function getAccountCache(userId, asset = DEFAULT_ASSET) {

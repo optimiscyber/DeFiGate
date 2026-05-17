@@ -9,6 +9,8 @@ export const AUDIT_ACTIONS = {
   WITHDRAWAL_INITIATED: 'withdrawal_initiated',
   WITHDRAWAL_BROADCASTED: 'withdrawal_broadcasted',
   WALLET_CREATED: 'wallet_created',
+  WALLET_REUSED: 'wallet_reused',
+  BALANCE_SYNCED: 'balance_synced',
   ACCOUNT_LEDGER_ENTRY: 'account_ledger_entry',
   RECONCILIATION_RUN: 'reconciliation_run',
   RECONCILIATION_MISMATCH: 'reconciliation_mismatch',

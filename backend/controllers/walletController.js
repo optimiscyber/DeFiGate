@@ -1,6 +1,6 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import pool from "../db.js";
+import { supabase } from "../config/supabase.js";
 import {
   Connection,
   PublicKey,
@@ -88,18 +88,30 @@ async function saveWallet(userId, privyWallet, chainType = "solana") {
     null;
 
   try {
-    const insert = await pool.query(
-      `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain, encrypted_private_key, is_primary, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
-       ON CONFLICT (user_id, chain) DO NOTHING
-       RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at, updated_at, last_accessed_at, last_synced_at, last_scanned_at, is_primary`,
-      [userId, "privy", providerWalletId, address, chainType, null]
-    );
+    const { data, error } = await supabase
+      .from('wallets')
+      .insert([
+        {
+          user_id: userId,
+          provider: 'privy',
+          provider_wallet_id: providerWalletId,
+          address,
+          chain: chainType,
+          encrypted_private_key: null,
+          is_primary: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select('*');
 
-    if (insert.rows[0]) {
-      return insert.rows[0];
+    if (error) {
+      console.error('saveWallet error', error.message || error);
+      return await getCanonicalWallet(userId, chainType);
     }
-
+    if (data && data[0]) {
+      return data[0];
+    }
     return await getCanonicalWallet(userId, chainType);
   } catch (error) {
     console.error("saveWallet error", error?.message || error);
@@ -123,10 +135,10 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
     try {
       const existing = await getWalletByUserId(userId);
       if (existing) {
-        await pool.query(
-          `UPDATE wallets SET last_accessed_at = NOW() WHERE id = $1`,
-          [existing.id]
-        );
+        await supabase
+          .from('wallets')
+          .update({ last_accessed_at: new Date().toISOString() })
+          .eq('id', existing.id);
 
         await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
           user_id: userId,
@@ -143,38 +155,17 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
         return { ...existing, status: "connected", last_accessed_at: new Date().toISOString() };
       }
 
-      if (!isPrivyEnabled) {
-        const wallet = {
-          id: key,
-          user_id: userId,
-          provider: "local",
-          provider_wallet_id: null,
-          address: null,
-          chain: chainType,
-          status: "disconnected",
-          created_at: new Date().toISOString(),
-        };
-        return wallet;
-      }
-
-      const privyWallet = await createPrivyWallet(chainType);
-      const wallet = await saveWallet(userId, privyWallet, chainType);
-
-      await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
+      // Do not auto-create wallets here. Only existing canonical wallets are reused.
+      return {
+        id: key,
         user_id: userId,
-        wallet_id: wallet.id,
-        asset: chainType,
-        tx_hash: null,
-        metadata: {
-          provider: wallet.provider,
-          provider_wallet_id: wallet.provider_wallet_id,
-          wallet_address: wallet.address,
-          created_at: wallet.created_at,
-        },
-        request_id: `wallet_create_${Date.now()}`,
-      });
-
-      return { ...wallet, status: "connected", metadata: privyWallet };
+        provider: "none",
+        provider_wallet_id: null,
+        address: null,
+        chain: chainType,
+        status: "disconnected",
+        created_at: new Date().toISOString(),
+      };
     } catch (err) {
       console.error("DB wallet error, falling back to in-memory", err?.message || err);
     }
@@ -185,50 +176,16 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
     return inMemoryWallets.get(key);
   }
 
-  if (!isPrivyEnabled) {
-    const wallet = {
-      id: key,
-      address: `sol_${userId.substring(0, 8).toUpperCase()}`,
-      provider: "local",
-      provider_wallet_id: null,
-      chain: chainType,
-      status: "disconnected",
-      created_at: new Date().toISOString(),
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  }
-
-  // For Privy with different chains, we create a new Privy wallet
-  try {
-    const privyWallet = await createPrivyWallet(chainType);
-    const wallet = {
-      id: `${privyWallet.id}_${chainType}`,
-      provider: "privy",
-      provider_wallet_id: privyWallet.id,
-      address: privyWallet.accounts?.[0]?.address || privyWallet.address || null,
-      chain: chainType,
-      status: "connected",
-      created_at: new Date().toISOString(),
-      metadata: privyWallet,
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  } catch (err) {
-    console.error("ensureUserWallet privy error", err?.response?.data || err?.message || err);
-    const wallet = {
-      id: key,
-      address: `sol_${userId.substring(0, 8).toUpperCase()}`,
-      provider: "local",
-      provider_wallet_id: null,
-      chain: chainType,
-      status: "disconnected",
-      created_at: new Date().toISOString(),
-      error: err?.response?.data || err?.message,
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  }
+  return {
+    id: key,
+    user_id: userId,
+    provider: "none",
+    provider_wallet_id: null,
+    address: null,
+    chain: chainType,
+    status: "disconnected",
+    created_at: new Date().toISOString(),
+  };
 }
 
 // POST /wallet/create — create a server-side wallet via Privy
@@ -245,7 +202,45 @@ export const createEmbeddedWallet = async (req, res) => {
   }
 
   try {
-    const wallet = await ensureUserWallet(userId, email, chainType);
+    const key = `${userId}:${chainType}`;
+    const existing = await getWalletByUserId(userId);
+    if (existing) {
+      return res.json({ ok: true, data: existing });
+    }
+
+    if (!isPrivyEnabled) {
+      return res.json({
+        ok: true,
+        data: {
+          id: key,
+          user_id: userId,
+          provider: 'local',
+          provider_wallet_id: null,
+          address: null,
+          chain: chainType,
+          status: 'disconnected',
+          created_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    const privyWallet = await createPrivyWallet(chainType);
+    const wallet = await saveWallet(userId, privyWallet, chainType);
+
+    await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
+      user_id: userId,
+      wallet_id: wallet.id,
+      asset: chainType,
+      tx_hash: null,
+      metadata: {
+        provider: wallet.provider,
+        provider_wallet_id: wallet.provider_wallet_id,
+        wallet_address: wallet.address,
+        created_at: wallet.created_at,
+      },
+      request_id: `wallet_create_${Date.now()}`,
+    });
+
     return res.json({ ok: true, data: wallet });
   } catch (err) {
     console.error("wallet creation error", err?.message || err);
@@ -257,11 +252,17 @@ export const createEmbeddedWallet = async (req, res) => {
 
 // POST /wallet/send — sign and broadcast a transaction via Privy
 async function resolvePrivyWalletId(walletId) {
-  const result = await pool.query(
-    `SELECT provider_wallet_id FROM wallets WHERE id = $1 OR provider_wallet_id = $1 LIMIT 1`,
-    [walletId]
-  );
-  return result.rows[0]?.provider_wallet_id || null;
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('provider_wallet_id')
+    .or(`id.eq.${walletId},provider_wallet_id.eq.${walletId}`)
+    .limit(1);
+
+  if (error) {
+    console.error('resolvePrivyWalletId error', error.message || error);
+    return null;
+  }
+  return data?.[0]?.provider_wallet_id || null;
 }
 
 export const sendTxToAddress = async (req, res) => {
@@ -431,8 +432,7 @@ export const getDepositAddress = async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Wallet not found' });
     }
 
-    const usdcBalance = await getAppLedgerBalance(userId, 'USDC');
-    const solBalance = await getAppLedgerBalance(userId, 'SOL');
+    const balanceResult = await syncWalletBalances(wallet);
 
     return res.json({
       ok: true,
@@ -440,10 +440,16 @@ export const getDepositAddress = async (req, res) => {
         address: wallet.address,
         chain: wallet.chain,
         is_primary: wallet.is_primary,
-        last_synced_at: wallet.last_synced_at || wallet.last_scanned_at || wallet.last_accessed_at,
+        last_synced_at: balanceResult.last_synced_at || wallet.last_synced_at || wallet.last_scanned_at || wallet.last_accessed_at,
         balances: {
-          SOL: solBalance,
-          USDC: usdcBalance,
+          SOL: balanceResult.asset_balances.SOL.app,
+          USDC: balanceResult.asset_balances.USDC.app,
+          onchain_SOL: balanceResult.asset_balances.SOL.blockchain,
+          ledger_SOL: balanceResult.asset_balances.SOL.app,
+        },
+        sync_status: {
+          sol: balanceResult.asset_balances.SOL.status,
+          usdc: balanceResult.asset_balances.USDC.status,
         },
       },
     });
@@ -467,10 +473,10 @@ export const getWalletBalances = async (req, res) => {
     }
 
     const balanceResult = await syncWalletBalances(wallet);
-    await pool.query(
-      `UPDATE wallets SET last_synced_at = NOW() WHERE id = $1`,
-      [wallet.id]
-    );
+    await supabase
+      .from('wallets')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', wallet.id);
 
     return res.json({ ok: true, data: { ...balanceResult, last_synced_at: new Date().toISOString() } });
   } catch (err) {

@@ -1,5 +1,6 @@
 // controllers/adminController.js
 import { runReconciliation, autoRepairSafeMismatches } from '../services/reconciliationService.js';
+import { repairMissingDeposits } from '../services/balanceSyncService.js';
 import { processDeposit } from '../services/depositDetector.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
@@ -56,10 +57,10 @@ export const reconcileWallet = async (req, res) => {
     }
 
     const result = await runReconciliation({ walletId });
+    const repairResult = await repairMissingDeposits({ walletId });
 
-    let repairResult = null;
     if (autoRepair && result.mismatches > 0) {
-      repairResult = await autoRepairSafeMismatches();
+      await autoRepairSafeMismatches();
     }
 
     await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
@@ -69,6 +70,7 @@ export const reconcileWallet = async (req, res) => {
         wallet_id: walletId,
         auto_repair: autoRepair,
         results: result,
+        repair_result: repairResult,
       },
       ip_address: req.ip,
       user_agent: req.get('User-Agent'),

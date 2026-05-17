@@ -54,13 +54,12 @@ function isSolanaAddress(address) {
  * @returns {BigInt} Amount in lamports (positive if deposit detected)
  */
 function getSolDepositAmountFromMeta(tx, walletAddress) {
-  if (!tx || !tx.meta || !tx.meta.preBalances || !tx.meta.postBalances || !tx.transaction?.message?.accountKeys) {
+  if (!tx || !tx.meta || tx.meta.err || !tx.meta.preBalances || !tx.meta.postBalances || !tx.transaction?.message?.accountKeys) {
     return 0n;
   }
 
-  const accountIndex = tx.transaction.message.accountKeys.findIndex(
-    (key) => key.toString() === walletAddress
-  );
+  const accountKeys = tx.transaction.message.accountKeys.map((key) => key.toString());
+  const accountIndex = accountKeys.findIndex((key) => key === walletAddress);
   if (accountIndex < 0) {
     return 0n;
   }
@@ -164,10 +163,10 @@ async function processSolDeposit(wallet, signature) {
   if (existing) return false;
 
   const tx = await connection.getParsedTransaction(signature, { commitment: 'confirmed' });
-  if (!tx || !tx.meta) return false;
+  if (!tx || !tx.meta || tx.meta.err) return false;
 
   // Detect SOL deposit
-  const amountLamports = getSolDepositAmountFromMeta(tx.meta, wallet.address);
+  const amountLamports = getSolDepositAmountFromMeta(tx, wallet.address);
   if (amountLamports <= 0n) return false;
 
   const amountSol = formatSolAmount(amountLamports);
@@ -175,18 +174,7 @@ async function processSolDeposit(wallet, signature) {
   let depositTransaction;
   
   await sequelize.transaction(async (transaction) => {
-    // Ensure user SOL account exists
-    const userAccount = await Account.findOne({
-      where: { user_id: wallet.user_id, asset: 'SOL' },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-
-    if (!userAccount) {
-      throw new Error(`User SOL account not found for wallet ${wallet.address}`);
-    }
-
-    const systemAccount = await ensureSystemAccountForAsset('SOL', transaction);
+    await ensureUserAccount(wallet.user_id, 'SOL');
 
     depositTransaction = await Transaction.create(
       {
@@ -254,17 +242,7 @@ async function processUsdcDeposit(wallet, signature) {
   let depositTransaction;
 
   await sequelize.transaction(async (transaction) => {
-    const userAccount = await Account.findOne({
-      where: { user_id: wallet.user_id, asset: 'USDC' },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-
-    if (!userAccount) {
-      throw new Error(`User USDC account not found for wallet ${wallet.address}`);
-    }
-
-    const systemAccount = await ensureSystemAccountForAsset('USDC', transaction);
+    await ensureUserAccount(wallet.user_id, 'USDC');
 
     depositTransaction = await Transaction.create(
       {

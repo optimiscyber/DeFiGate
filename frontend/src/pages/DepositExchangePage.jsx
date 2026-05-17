@@ -41,6 +41,27 @@ const DepositExchangePage = ({ currentUser, navigateTo }) => {
     fetchDepositInfo();
   }, [currentUser]);
 
+  const refreshDepositInfo = async () => {
+    if (!currentUser?.token) return;
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl('/wallet/balances'), {
+        headers: {
+          Authorization: `Bearer ${currentUser.token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setDepositInfo(data.data);
+      }
+    } catch (error) {
+      console.error('Failed to refresh deposit info', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!wallet) {
     return (
       <div className="page-container">
@@ -115,16 +136,27 @@ const DepositExchangePage = ({ currentUser, navigateTo }) => {
           {loading ? (
             <p>Loading balances…</p>
           ) : depositInfo ? (
-            <ul>
-              <li>SOL: {depositInfo.balances?.SOL ?? '0.00'}</li>
-              <li>USDC: {depositInfo.balances?.USDC ?? '0.00'}</li>
-            </ul>
+            <div>
+              <ul>
+                <li>Ledger SOL: {depositInfo.balances?.SOL ?? '0.00'}</li>
+                <li>Onchain SOL: {depositInfo.balances?.onchain_SOL ?? '0.00'}</li>
+                <li>USDC: {depositInfo.balances?.USDC ?? '0.00'}</li>
+              </ul>
+              <div className="sync-status">
+                <strong>Sync status:</strong>
+                <div>SOL: {depositInfo.sync_status?.sol || 'unknown'}</div>
+                <div>USDC: {depositInfo.sync_status?.usdc || 'unknown'}</div>
+              </div>
+            </div>
           ) : (
             <p>Unable to load wallet balances.</p>
           )}
           {depositInfo?.last_synced_at && (
             <p className="sync-info">Last synced: {new Date(depositInfo.last_synced_at).toLocaleString()}</p>
           )}
+          <button className="btn btn-secondary" onClick={refreshDepositInfo} disabled={loading}>
+            {loading ? 'Syncing…' : 'Refresh balances'}
+          </button>
         </div>
 
         <div className="deposit-instructions warning-box">

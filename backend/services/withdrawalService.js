@@ -199,7 +199,6 @@ export async function processUSDCWithdrawal(userId, walletId, recipientAddress, 
 
     await reserveFunds(userId, withdrawalAmount, {
       asset: 'USDC',
-      transaction: tx,
     });
 
     const withdrawalTransaction = await Transaction.create(
@@ -309,7 +308,6 @@ export async function rejectWithdrawal(transactionId, operatorUserId, reason = '
     const amount = parseFloat(withdrawalTransaction.amount || 0);
     await releaseFunds(userAccount.user_id, amount, {
       asset: 'USDC',
-      transaction: tx,
     });
 
     const beforeStatus = withdrawalTransaction.status;
@@ -387,7 +385,6 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
     await sequelize.transaction(async (refundTx) => {
       await releaseFunds(withdrawalTransaction.user_id, amountValue, {
         asset: 'USDC',
-        transaction: refundTx,
       });
       withdrawalTransaction.status = 'failed';
       withdrawalTransaction.failed_at = new Date();
@@ -424,18 +421,18 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
     .then(async (confirmation) => {
       const confirmedTx = await Transaction.findByPk(transactionId);
       if (!confirmedTx) return;
+
+      const amountValue = parseFloat(confirmedTx.amount || 0);
       if (confirmation.confirmed && confirmation.success) {
-        const amountValue = parseFloat(confirmedTx.amount || 0);
         await sequelize.transaction(async (tx) => {
           await commitReservedFunds(confirmedTx.user_id, amountValue, {
             asset: 'USDC',
             walletId: confirmedTx.wallet_id,
-            txHash: txHash,
+            txHash,
             metadata: {
               source: 'withdrawal_confirmation',
               withdrawal_id: confirmedTx.id,
             },
-            transaction: tx,
           });
 
           await confirmedTx.update(
@@ -449,10 +446,8 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
         });
       } else {
         await sequelize.transaction(async (refundTx) => {
-          const amountValue = parseFloat(confirmedTx.amount || 0);
           await releaseFunds(confirmedTx.user_id, amountValue, {
             asset: 'USDC',
-            transaction: refundTx,
           });
           await confirmedTx.update(
             {
@@ -469,12 +464,17 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
       console.error('Post-broadcast confirmation error:', error.message || error);
       const confirmedTx = await Transaction.findByPk(transactionId);
       if (!confirmedTx) return;
+
+      const amountValue = parseFloat(confirmedTx.amount || 0);
       await sequelize.transaction(async (refundTx) => {
-        const amountValue = parseFloat(confirmedTx.amount || 0);
         await releaseFunds(confirmedTx.user_id, amountValue, {
           asset: 'USDC',
-          transaction: refundTx,
         });
+        await confirmedTx.update(
+          {
+            status: 'failed',
+            failed_at: new Date(),
+            failure_reason: 'Confirmation flow error',
           },
           { transaction: refundTx }
         );

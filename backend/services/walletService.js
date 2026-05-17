@@ -1,83 +1,108 @@
-import pool from "../db.js";
-import { Wallet } from "../models/index.js";
+import { supabase } from '../config/supabase.js';
 
-export async function warnIfDuplicateWallets(userId, chainType = "solana") {
-  const countResult = await pool.query(
-    `SELECT COUNT(*) AS count
-     FROM wallets
-     WHERE user_id = $1 AND chain = $2`,
-    [userId, chainType]
-  );
-  const count = parseInt(countResult.rows?.[0]?.count || "0", 10);
-  if (count > 1) {
+function normalizeChain(chainType) {
+  return String(chainType || 'solana').toLowerCase();
+}
+
+function throwIfSupabaseError(error, context) {
+  if (error) {
+    const message = error.message || `Supabase error during ${context}`;
+    throw new Error(message);
+  }
+}
+
+export async function warnIfDuplicateWallets(userId, chainType = 'solana') {
+  const { count, error } = await supabase
+    .from('wallets')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('chain', normalizeChain(chainType));
+
+  throwIfSupabaseError(error, 'warnIfDuplicateWallets');
+  if (typeof count === 'number' && count > 1) {
     console.warn(
       `Wallet warning: user ${userId} has ${count} wallets for chain ${chainType}. Using canonical wallet only.`
     );
   }
 }
 
-export async function getCanonicalWallet(userId, chainType = "solana") {
+export async function getCanonicalWallet(userId, chainType = 'solana') {
   if (!userId) return null;
 
-  const wallet = await Wallet.findOne({
-    where: { user_id: userId, chain: chainType },
-    order: [
-      ["is_primary", "DESC"],
-      ["created_at", "ASC"],
-    ],
-  });
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('chain', normalizeChain(chainType))
+    .order('is_primary', { ascending: false })
+    .order('created_at', { ascending: true })
+    .limit(1);
 
-  if (!wallet) {
-    return null;
+  throwIfSupabaseError(error, 'getCanonicalWallet');
+
+  const wallet = (data && data[0]) || null;
+  if (wallet) {
+    await warnIfDuplicateWallets(userId, chainType);
   }
-
-  await warnIfDuplicateWallets(userId, chainType);
   return wallet;
 }
 
 export async function getCanonicalWalletByWalletId(walletId) {
   if (!walletId) return null;
-  const wallet = await Wallet.findByPk(walletId);
+
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('*')
+    .eq('id', walletId)
+    .limit(1)
+    .single();
+
+  if (error && error.code === 'PGRST116') {
+    return null;
+  }
+  throwIfSupabaseError(error, 'getCanonicalWalletByWalletId');
+
+  const wallet = data || null;
   if (!wallet) return null;
-  const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || "solana");
+
+  const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || 'solana');
   if (canonical && canonical.id !== wallet.id) {
     console.error(
       `Wallet fallback: requested wallet ${wallet.id} but using canonical wallet ${canonical.id} for user ${canonical.user_id}.`
     );
   }
-  return canonical;
+
+  return canonical || wallet;
 }
 
-export async function getAllCanonicalWallets(chainType = "solana") {
-  const duplicateRows = await pool.query(
-    `SELECT user_id, COUNT(*) AS count
-     FROM wallets
-     WHERE chain = $1
-     GROUP BY user_id
-     HAVING COUNT(*) > 1`,
-    [chainType]
-  );
+export async function getAllCanonicalWallets(chainType = 'solana') {
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('*')
+    .eq('chain', normalizeChain(chainType))
+    .order('user_id', { ascending: true })
+    .order('is_primary', { ascending: false })
+    .order('created_at', { ascending: true });
 
-  for (const row of duplicateRows.rows) {
-    console.warn(
-      `Wallet warning: user ${row.user_id} has ${row.count} wallets for chain ${chainType}. Using canonical wallet only.`
+  throwIfSupabaseError(error, 'getAllCanonicalWallets');
+
+  const canonicalByUser = new Map();
+  for (const wallet of data || []) {
+    if (!canonicalByUser.has(wallet.user_id)) {
+      canonicalByUser.set(wallet.user_id, wallet);
+    }
+  }
+
+  for (const row of Array.from(canonicalByUser.values())) {
+    const duplicates = data.filter(
+      (w) => w.user_id === row.user_id && w.chain === normalizeChain(chainType)
     );
+    if (duplicates.length > 1) {
+      console.warn(
+        `Wallet warning: user ${row.user_id} has ${duplicates.length} wallets for chain ${chainType}. Using canonical wallet only.`
+      );
+    }
   }
 
-  const rows = await pool.query(
-    `SELECT DISTINCT ON (user_id) id
-     FROM wallets
-     WHERE chain = $1
-     ORDER BY user_id, is_primary DESC, created_at ASC`,
-    [chainType]
-  );
-  const ids = rows.rows.map((r) => r.id);
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return await Wallet.findAll({
-    where: { id: ids },
-    order: [["user_id", "ASC"]],
-  });
+  return Array.from(canonicalByUser.values());
 }
